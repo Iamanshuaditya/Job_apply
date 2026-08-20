@@ -1,0 +1,6 @@
+[
+  { "kind": "greenhouse", "company": "Example Co", "boardToken": "example", "enabled": true },
+  { "kind": "lever", "company": "Example Lever Co", "site": "example", "region": "global", "enabled": false },
+  { "kind": "ashby", "company": "Example Ashby Co", "boardName": "example", "enabled": false },
+  { "kind": "json-feed", "company": "Custom", "url": "https://example.com/jobs.json", "enabled": false }
+]

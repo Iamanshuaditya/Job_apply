@@ -1,17 +1,22 @@
 {
   "name": "full-stack-job-application-agent",
-  "version": "0.1.0",
-  "description": "Evidence-first, resumable full-stack job application agent with graph-style orchestration and independent verification.",
+  "version": "0.2.0",
+  "description": "Evidence-first, resumable full-stack job application agent with a Twenty CRM control center.",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test",
     "test:e2e": "node --test tests/e2e.test.mjs",
     "test:scale": "node --test tests/scale.test.mjs",
-    "check": "node --check src/*.mjs src/application/*.mjs",
-    "validate": "npm run check && npm test"
+    "test:control-plane": "node --test tests/control-plane.test.mjs",
+    "check": "node --check src/*.mjs src/application/*.mjs src/discovery/*.mjs",
+    "validate": "npm run check && npm test",
+    "control-plane": "node src/control-plane-server.mjs",
+    "discover:daemon": "node src/daemon.mjs",
+    "browser:install": "playwright install chromium"
   },
+  "dependencies": { "playwright": "1.62.1" },
   "bin": { "job-apply": "src/cli.mjs" },
   "license": "MIT"
 }

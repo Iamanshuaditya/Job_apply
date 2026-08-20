@@ -1,0 +1,1 @@
+import{defineNavigationMenuItem,NavigationMenuItemType}from'twenty-sdk/define';import{IDS}from'src/constants/ids';export default defineNavigationMenuItem({universalIdentifier:IDS.evidence_nav,position:4,type:NavigationMenuItemType.OBJECT,targetObjectUniversalIdentifier:IDS.career_evidence_object});

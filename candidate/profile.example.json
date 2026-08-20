@@ -1,0 +1,16 @@
+{
+  "version": "example-v2",
+  "identity": {
+    "name": "Example Candidate",
+    "email": "jobs@example.com",
+    "phone": "+00 0000000000",
+    "location": "India",
+    "linkedin": "https://linkedin.com/in/example",
+    "github": "https://github.com/example",
+    "portfolio": "https://example.dev"
+  },
+  "context": { "professionalSummary": "", "workProgress": "", "knowledgeBase": "" },
+  "eligibility": { "authorizations": ["India"] },
+  "education": [],
+  "evidence": []
+}

@@ -8,13 +8,30 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  core:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: npm run validate
       - run: npm run test:e2e
       - run: npm run test:scale
+      - run: npm run test:control-plane
+
+  twenty-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/twenty-job-search-crm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: yarn install
+      - run: yarn typecheck
+      - run: yarn lint
+      - run: yarn twenty build

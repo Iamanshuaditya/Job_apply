@@ -1,0 +1,1 @@
+import{defineNavigationMenuItem,NavigationMenuItemType}from'twenty-sdk/define';import{IDS}from'src/constants/ids';export default defineNavigationMenuItem({universalIdentifier:IDS.dashboard_nav,name:'Job Search Dashboard',icon:'IconLayoutDashboard',position:1,type:NavigationMenuItemType.PAGE_LAYOUT,pageLayoutUniversalIdentifier:IDS.dashboard_layout});

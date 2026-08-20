@@ -1,18 +1,21 @@
 # STATE.md
 
 ## Verified current state
-- Repository bootstrapped as a standalone Node 20 project.
-- Candidate career evidence schema implemented with stable evidence IDs and explicit `verified: true` requirement.
-- Job normalization, URL canonicalization, hard filters, JD analysis, evidence matching, explainable scoring, resume planning, provenance-preserving generation, independent truth verification, bounded repair, ATS-safe PDF rendering/validation, checkpointing, submission ownership, attention routing, and append-only application ledger implemented.
-- Mock ATS provides success, CAPTCHA/legal attention, error, and ambiguous-confirmation behaviors.
-- Test suite covers core units, positive/negative/attention/repair/restart E2E, concurrency ownership, PDF extraction, and 1,000-job scale filtering/dedupe.
+- Candidate career evidence remains the only resume-claim source; profile context is stored separately and cannot silently become resume evidence.
+- Job normalization, URL canonicalization, company aliases/exclusions, JD analysis, evidence matching, explainable scoring, resume planning, independent truth verification, bounded repair, ATS-safe PDF rendering/validation, checkpoints, submission ownership and append-only ledger are implemented.
+- Live read-only discovery adapters exist for Greenhouse, Lever, Ashby and configurable JSON feeds, with a persistent seen-job store so daily runs do not reprocess the same posting as new.
+- The workflow has an explicit human approval boundary: `Run All` ends in `AWAITING_APPROVAL`; `Apply All Approved` is a separate action.
+- The exact reviewed resume SHA-256 is carried into the application step. A changed resume is blocked as `REVIEWED_RESUME_HASH_CHANGED`.
+- A Playwright browser adapter fills deterministic identity fields, uploads the reviewed resume and requires visible success evidence before recording `SUBMITTED`. CAPTCHA, legal/sensitive questions, unsupported required fields and ambiguous confirmation route to attention instead of being guessed.
+- A Twenty CRM app exists under `apps/twenty-job-search-crm` with Candidate Profile, Career Evidence, Job Sources, Excluded Companies, Jobs, Resume Variants, Automation Runs, Application History and Attention objects plus a CRM-native control dashboard.
+- Control-plane tests verify discovery normalization, persistent job memory, prepare-without-submit, explicit approval, Apply All, and confirmed ledger state.
+- The purpose-built UI preview has been visually inspected at 1440×1000 and follows Twenty's restrained CRM visual language.
 
-## Not yet verified against production
-- Live employer discovery adapters.
-- Live Greenhouse/Lever/Ashby browser adapters.
-- OS-backed secret/profile migration from the upstream project.
-- Real LLM provider abstraction and token/cost accounting.
-- Live browser upload/confirmation semantics.
+## External boundaries still requiring environment-specific verification
+- Each real employer/ATS can introduce custom fields and DOM flows; the generic Playwright adapter deliberately routes unsupported forms to Attention. Site-specific adapters should be added from observed failures rather than guessed.
+- Final-submit automation is disabled unless `JOB_APPLY_ALLOW_SUBMIT=true`.
+- A running Twenty instance is required to publish/install the private app and validate workspace-specific API permissions and generated schema names.
+- OS-backed storage for sensitive candidate configuration and a production LLM provider/cost layer remain future hardening work.
 
 ## Completion status
-Foundation milestone only. Do not claim the full production definition of done until the external adapters and upstream compatibility work are implemented and independently re-verified.
+The CRM control plane, review gate, discovery layer and generic browser application queue are implemented and locally verified. Do not claim universal production coverage for every ATS until those real-site flows have been exercised with authorized targets.

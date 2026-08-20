@@ -1,9 +1,25 @@
 const includesCI = (values, value) => values.some((x) => String(x).toLowerCase() === String(value).toLowerCase());
 
+const normalizeCompany = (value) => String(value || '')
+  .toLowerCase()
+  .replace(/&/g, ' and ')
+  .replace(/\b(private limited|pvt\.?\s*ltd\.?|limited|ltd\.?|incorporated|inc\.?|llc|corp\.?|corporation|technologies|technology)\b/g, ' ')
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim()
+  .replace(/\s+/g, ' ');
+
+const companyExcluded = (excluded, company) => {
+  const candidate = normalizeCompany(company);
+  return (excluded || []).some((entry) => {
+    const names = typeof entry === 'string' ? [entry] : [entry?.name, ...(entry?.aliases || [])];
+    return names.filter(Boolean).some((name) => normalizeCompany(name) === candidate);
+  });
+};
+
 export function hardFilter(job, preferences = {}, profile = {}) {
   const reasons = [];
   if (job.status !== 'active') reasons.push(`posting-${job.status}`);
-  if (includesCI(preferences.excludedCompanies || [], job.company)) reasons.push('excluded-company');
+  if (companyExcluded(preferences.excludedCompanies || [], job.company)) reasons.push('excluded-company');
   if ((preferences.excludedTitles || []).some((x) => job.title.toLowerCase().includes(x.toLowerCase()))) reasons.push('excluded-title');
   if (preferences.employmentTypes?.length && !includesCI(preferences.employmentTypes, job.employmentType)) reasons.push('employment-type');
   if (preferences.workModes?.length && job.workMode !== 'unknown' && !includesCI(preferences.workModes, job.workMode)) reasons.push('work-mode');

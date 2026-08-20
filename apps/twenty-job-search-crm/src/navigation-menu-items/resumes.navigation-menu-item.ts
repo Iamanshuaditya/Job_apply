@@ -1,0 +1,1 @@
+import{defineNavigationMenuItem,NavigationMenuItemType}from'twenty-sdk/define';import{IDS}from'src/constants/ids';export default defineNavigationMenuItem({universalIdentifier:IDS.resumes_nav,position:7,type:NavigationMenuItemType.OBJECT,targetObjectUniversalIdentifier:IDS.resume_variant_object});
