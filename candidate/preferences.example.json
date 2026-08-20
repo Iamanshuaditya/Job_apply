@@ -1,0 +1,10 @@
+{
+  "targetTitles": ["Full Stack", "Full-Stack", "Fullstack", "Product Engineer", "Software Engineer"],
+  "targetSkills": ["React", "Next.js", "Node.js", "TypeScript"],
+  "excludedTitles": ["Mobile", "Android", "iOS"],
+  "excludedCompanies": [],
+  "excludedLocations": [],
+  "workModes": ["remote", "hybrid", "onsite"],
+  "employmentTypes": ["full-time"],
+  "thresholds": { "manual": 70, "auto": 80 }
+}
