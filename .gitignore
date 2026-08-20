@@ -1,0 +1,12 @@
+node_modules/
+.job-apply-run/
+.run/
+generated/
+*.log
+.env
+.env.*
+!*.example
+candidate/private/
+applications.ndjson
+outcomes.ndjson
+attention.ndjson
