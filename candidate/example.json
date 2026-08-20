@@ -1,0 +1,11 @@
+{
+  "version": "example-v1",
+  "identity": { "name": "Example Candidate", "email": "candidate@example.com", "phone": "+00 0000000000", "location": "India" },
+  "eligibility": { "authorizations": ["India"] },
+  "education": [{ "degree": "Bachelor's degree", "institution": "Example University" }],
+  "evidence": [
+    { "id": "exp_web_001", "type": "experience-bullet", "fact": "Built customer-facing applications with React, Next.js and TypeScript.", "skills": ["React", "Next.js", "TypeScript"], "verified": true },
+    { "id": "exp_api_002", "type": "experience-bullet", "fact": "Built backend APIs with Node.js, Express and PostgreSQL.", "skills": ["Node.js", "Express", "PostgreSQL"], "verified": true },
+    { "id": "proj_rt_003", "type": "project", "fact": "Implemented realtime functionality with Socket.IO and WebSockets.", "skills": ["Socket.IO", "WebSockets", "Node.js"], "verified": true }
+  ]
+}

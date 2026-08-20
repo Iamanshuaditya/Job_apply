@@ -1,0 +1,18 @@
+{
+  "company": "Acme Labs",
+  "title": "Full Stack Engineer",
+  "canonicalUrl": "https://jobs.example.test/acme/123?utm_source=board",
+  "applicationUrl": "https://jobs.example.test/acme/123",
+  "externalId": "ACME-123",
+  "source": "fixture",
+  "description": "Build product experiences with React, TypeScript and Node.js.",
+  "locations": ["Remote"],
+  "workMode": "remote",
+  "employmentType": "full-time",
+  "status": "active",
+  "requirements": [
+    { "requirement": "React production experience", "kind": "must-have", "skills": ["React"] },
+    { "requirement": "Node.js production experience", "kind": "must-have", "skills": ["Node.js"] },
+    { "requirement": "TypeScript experience", "kind": "must-have", "skills": ["TypeScript"] }
+  ]
+}
