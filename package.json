@@ -1,0 +1,17 @@
+{
+  "name": "full-stack-job-application-agent",
+  "version": "0.1.0",
+  "description": "Evidence-first, resumable full-stack job application agent with graph-style orchestration and independent verification.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test",
+    "test:e2e": "node --test tests/e2e.test.mjs",
+    "test:scale": "node --test tests/scale.test.mjs",
+    "check": "node --check src/*.mjs src/application/*.mjs",
+    "validate": "npm run check && npm test"
+  },
+  "bin": { "job-apply": "src/cli.mjs" },
+  "license": "MIT"
+}
