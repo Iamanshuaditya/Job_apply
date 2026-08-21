@@ -199,7 +199,7 @@ export class JobControlPlane {
       const runDir = job.runId ? path.join(this.stateDir, 'runs', job.runId) : defaultRunDir;
       const result = await processJob({
         rawJob: job, rawProfile: profile, preferences, runDir, ats: this.ats,
-        submissionMode: 'auto', expectedResumeHash: job.resumeHash
+        submissionMode: 'auto', expectedResumeHash: job.resumeHash, requireReviewedResume: true
       });
       await this.jobs.patch(job.jobId, {
         crmStatus: result.state,
