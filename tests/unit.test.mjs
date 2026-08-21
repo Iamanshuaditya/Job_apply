@@ -6,7 +6,7 @@ import path from 'node:path';
 import { validateCareerProfile } from '../src/career.mjs';
 import { canonicalizeUrl, normalizeJob, classifyDuplicate, jobFingerprint } from '../src/jobs.mjs';
 import { hardFilter } from '../src/filters.mjs';
-import { analyzeJD } from '../src/jd.mjs';
+import { analyzeJD, inferRoleFamily } from '../src/jd.mjs';
 import { matchEvidence } from '../src/career.mjs';
 import { scoreFit } from '../src/scoring.mjs';
 import { planResume, generateResume } from '../src/resume.mjs';
@@ -65,6 +65,12 @@ test('non-engineering role family is hard-gated from engineering targets', () =>
   assert.equal(analysis.roleFamily, 'marketing');
   assert.equal(result.route, 'skip');
   assert.ok(result.hardFailures.some((failure) => failure.includes('role-family-mismatch')));
+});
+
+test('full-stack JDs are not shadowed by frontend/backend keywords', () => {
+  assert.equal(inferRoleFamily('Full Stack Developer | React frontend and Node backend'), 'full-stack');
+  assert.equal(inferRoleFamily('Fullstack Engineer, Product Team | build APIs and React on the frontend'), 'full-stack');
+  assert.equal(inferRoleFamily('Backend Engineer | Node.js APIs'), 'backend');
 });
 
 test('resume planning supplements narrow matches with useful verified evidence', () => {
