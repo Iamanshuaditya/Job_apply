@@ -11,9 +11,9 @@ const ROLE_RULES = [
   ['mobile', /mobile engineer|android|ios|react native|flutter|kotlin|swift/i],
   ['data', /data engineer|machine learning|ml engineer|ai engineer|research engineer|data scientist/i],
   ['devops', /devops|site reliability|\bsre\b|platform engineer|infrastructure engineer/i],
+  ['full-stack', /full.?stack|product engineer|web engineer/i],
   ['frontend', /front.?end|frontend|ui engineer/i],
   ['backend', /back.?end|backend|api engineer/i],
-  ['full-stack', /full.?stack|product engineer|web engineer/i],
   ['software', /software engineer|developer|engineering/i]
 ];
 
