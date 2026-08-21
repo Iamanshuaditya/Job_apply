@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable
-      - run: yarn install
+      - run: yarn install --no-immutable
       - run: yarn typecheck
       - run: yarn lint
       - run: yarn twenty build
