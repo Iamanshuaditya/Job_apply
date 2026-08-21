@@ -12,10 +12,10 @@ import { CheckpointStore } from './state.mjs';
 import { Ledger } from './ledger.mjs';
 import { ensureDir, sha256, slug, writeJson } from './utils.mjs';
 
-const reviewedArtifact = async ({ existing, resumePath, expectedResumeHash, submissionMode }) => {
+const reviewedArtifact = async ({ existing, resumePath, expectedResumeHash, requireReviewedResume }) => {
   const reviewedPath = existing?.resumePath || resumePath;
   if (!expectedResumeHash) {
-    if (submissionMode === 'auto') return { missingHash: true, resumePath: reviewedPath };
+    if (requireReviewedResume) return { missingHash: true, resumePath: reviewedPath };
     return null;
   }
   try {
@@ -27,14 +27,14 @@ const reviewedArtifact = async ({ existing, resumePath, expectedResumeHash, subm
   }
 };
 
-export async function processJob({rawJob,rawProfile,preferences,runDir,ats,injectUnsupportedClaim=false,crashAfter=null,submissionMode='auto',expectedResumeHash=null}){
+export async function processJob({rawJob,rawProfile,preferences,runDir,ats,injectUnsupportedClaim=false,crashAfter=null,submissionMode='auto',expectedResumeHash=null,requireReviewedResume=false}){
   await ensureDir(runDir);const profile=validateCareerProfile(rawProfile);const job=normalizeJob(rawJob);const checkpoints=new CheckpointStore(path.join(runDir,'checkpoints.json'));const ledger=new Ledger(path.join(runDir,'ledger'));const existing=await checkpoints.get(job.jobId);
   if(existing?.state==='SUBMITTED')return{reused:true,job,state:'SUBMITTED',checkpoint:existing};if(await ledger.check(job)){await checkpoints.save(job.jobId,{state:'SUBMITTED',reconciled:true});return{reused:true,job,state:'SUBMITTED'}}
   await checkpoints.save(job.jobId,{state:'NORMALIZED',job});const filter=hardFilter(job,preferences,profile);if(!filter.pass){await checkpoints.save(job.jobId,{state:'FILTERED_OUT',filter});return{job,state:'FILTERED_OUT',filter}}
   const analysis=existing?.analysis||analyzeJD(job);const matched=existing?.matched||matchEvidence(profile,analysis.requirements);const assessment=existing?.assessment||scoreFit({job,analysis,matchedRequirements:matched,preferences});if(assessment.route==='skip'){await checkpoints.save(job.jobId,{state:'FILTERED_OUT',analysis,matched,assessment});return{job,state:'FILTERED_OUT',assessment}}await checkpoints.save(job.jobId,{state:'QUALIFIED',analysis,matched,assessment});if(crashAfter==='assessment')throw new Error('INJECTED_CRASH_AFTER_ASSESSMENT');
   const plan=existing?.plan||planResume({profile,job,matchedRequirements:matched});await checkpoints.save(job.jobId,{state:'RESUME_PLANNED',plan});let resume=existing?.resume||generateResume({profile,job,plan,injectUnsupportedClaim});let verification=verifyResume({profile,resume});let attempts=1;while(verification.verdict==='reject'&&attempts<3){await checkpoints.save(job.jobId,{state:'RESUME_REJECTED',verification,attempts});resume=repairResume(resume,verification);verification=verifyResume({profile,resume});attempts++}if(verification.verdict!=='pass'){await checkpoints.save(job.jobId,{state:'FAILED',verification,attempts});return{job,state:'FAILED',verification}}await checkpoints.save(job.jobId,{state:'RESUME_VERIFIED',resume,verification,attempts});if(crashAfter==='verification')throw new Error('INJECTED_CRASH_AFTER_VERIFICATION');
   const artifactDir=path.join(runDir,'generated',`${slug(job.company)}-${slug(job.title)}-${job.jobId}`);const generatedResumePath=path.join(artifactDir,'resume.pdf');
-  const reviewed=await reviewedArtifact({existing,resumePath:generatedResumePath,expectedResumeHash,submissionMode});
+  const reviewed=await reviewedArtifact({existing,resumePath:generatedResumePath,expectedResumeHash,requireReviewedResume});
   let resumePath;let resumeHash;let pdf;
   if(reviewed){
     resumePath=reviewed.resumePath;
