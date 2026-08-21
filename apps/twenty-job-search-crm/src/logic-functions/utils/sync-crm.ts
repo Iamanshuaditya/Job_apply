@@ -20,7 +20,8 @@ export const pushWorkspaceConfigToOrchestrator = async () => {
       authorizations: true
     }),
     queryNodes(client, 'careerEvidences', {
-      id: true, title: true, evidenceType: true, organization: true, fact: true, skills: true, evidenceUrl: true, verified: true
+      id: true, title: true, evidenceType: true, organization: true, period: true, location: true,
+      fact: true, skills: true, evidenceUrl: true, verified: true
     }),
     queryNodes(client, 'excludedCompanies', { name: true, aliases: true }),
     queryNodes(client, 'jobSources', {
@@ -37,7 +38,10 @@ export const pushWorkspaceConfigToOrchestrator = async () => {
   const verified = evidences.filter((item: any) => item.verified && item.fact);
   const education = verified
     .filter((item: any) => String(item.evidenceType || '').toUpperCase() === 'EDUCATION')
-    .map((item: any) => ({ degree: item.title || '', institution: item.organization || '', evidenceId: `crm-${item.id}` }));
+    .map((item: any) => ({
+      degree: item.title || '', institution: item.organization || '', period: item.period || undefined,
+      location: item.location || undefined, evidenceId: `crm-${item.id}`
+    }));
 
   const profile = {
     version: `twenty-${new Date().toISOString()}`,
@@ -63,6 +67,8 @@ export const pushWorkspaceConfigToOrchestrator = async () => {
       type: String(item.evidenceType || 'OTHER').toLowerCase(),
       fact: item.fact,
       organization: item.organization || null,
+      period: item.period || null,
+      location: item.location || null,
       skills: csv(item.skills),
       evidenceUrl: item.evidenceUrl || null,
       verified: true
