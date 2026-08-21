@@ -23,7 +23,9 @@ export const pushWorkspaceConfigToOrchestrator = async () => {
       id: true, title: true, evidenceType: true, organization: true, fact: true, skills: true, evidenceUrl: true, verified: true
     }),
     queryNodes(client, 'excludedCompanies', { name: true, aliases: true }),
-    queryNodes(client, 'jobSources', { name: true, kind: true, company: true, boardKey: true, region: true, enabled: true })
+    queryNodes(client, 'jobSources', {
+      name: true, kind: true, company: true, boardKey: true, region: true, country: true, companySize: true, enabled: true
+    })
   ]);
 
   const profileRow = profiles[0];
@@ -90,6 +92,8 @@ export const pushWorkspaceConfigToOrchestrator = async () => {
         kind,
         company: item.company,
         region: item.region || undefined,
+        country: item.country || undefined,
+        companySize: item.companySize || undefined,
         enabled: true,
         ...(kind === 'greenhouse' ? { boardToken: item.boardKey }
           : kind === 'lever' ? { site: item.boardKey }
