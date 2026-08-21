@@ -28,6 +28,8 @@ export default defineObject({
     { universalIdentifier: IDS.job_source_company_field, type: FieldType.TEXT, name: 'company', label: 'Company' },
     { universalIdentifier: IDS.job_source_boardKey_field, type: FieldType.TEXT, name: 'boardKey', label: 'Board key / site' },
     { universalIdentifier: IDS.job_source_region_field, type: FieldType.TEXT, name: 'region', label: 'Region' },
+    { universalIdentifier: '0dbaf913-2657-4c94-b2e6-7ad6142d3a36', type: FieldType.TEXT, name: 'country', label: 'Country' },
+    { universalIdentifier: '8d5a27d5-fcac-41f2-894b-c9d80cde79a8', type: FieldType.TEXT, name: 'companySize', label: 'Company size' },
     { universalIdentifier: IDS.job_source_enabled_field, type: FieldType.BOOLEAN, name: 'enabled', label: 'Enabled' }
   ]
 });
