@@ -1,4 +1,144 @@
-import { CoreApiClient } from 'twenty-client-sdk/core'; import { orchestratorJson } from './orchestrator';
-const csv=(v?:string|null)=>String(v??'').split(',').map(x=>x.trim()).filter(Boolean);const queryNodes=async(client:any,plural:string,fields:any)=>{const result=await client.query({[plural]:{__args:{first:500},edges:{node:fields}}} as any);return(result?.[plural]?.edges??[]).map((edge:any)=>edge.node)};
-export const pushWorkspaceConfigToOrchestrator=async()=>{const client=new CoreApiClient() as any;const[profiles,evidences,exclusions,sources]=await Promise.all([queryNodes(client,'candidateProfiles',{id:true,name:true,email:true,phone:true,location:true,linkedin:true,github:true,portfolio:true,currentCompany:true,knowledgeBase:true,professionalSummary:true,workProgress:true,targetTitles:true,excludedTitles:true,targetSkills:true,excludedLocations:true,countries:true,minCompanySize:true,maxCompanySize:true,workModes:true,employmentTypes:true,manualThreshold:true,autoThreshold:true,authorizations:true}),queryNodes(client,'careerEvidences',{id:true,title:true,type:true,organization:true,fact:true,skills:true,evidenceUrl:true,verified:true}),queryNodes(client,'excludedCompanies',{name:true,aliases:true}),queryNodes(client,'jobSources',{name:true,kind:true,company:true,boardKey:true,region:true,enabled:true})]);const p=profiles[0];if(!p)throw new Error('Create a Candidate Profile before running automation.');const excluded:any[]=exclusions.map((x:any)=>({name:x.name,aliases:csv(x.aliases)}));if(p.currentCompany?.trim())excluded.push(p.currentCompany.trim());const verified=evidences.filter((x:any)=>x.verified&&x.fact);const education=verified.filter((x:any)=>String(x.type||'').toUpperCase()==='EDUCATION').map((x:any)=>({degree:x.title||'',institution:x.organization||'',evidenceId:`crm-${x.id}`}));const profile={version:`twenty-${new Date().toISOString()}`,identity:{name:p.name,email:p.email,phone:p.phone,location:p.location,linkedin:p.linkedin,github:p.github,portfolio:p.portfolio},context:{professionalSummary:p.professionalSummary||'',workProgress:p.workProgress||'',knowledgeBase:p.knowledgeBase||''},eligibility:{authorizations:csv(p.authorizations)},education,evidence:verified.map((x:any)=>({id:`crm-${x.id}`,title:x.title||null,type:String(x.type||'OTHER').toLowerCase(),fact:x.fact,organization:x.organization||null,skills:csv(x.skills),evidenceUrl:x.evidenceUrl||null,verified:true}))};const preferences={targetTitles:csv(p.targetTitles),excludedTitles:csv(p.excludedTitles),targetSkills:csv(p.targetSkills),excludedCompanies:excluded,excludedLocations:csv(p.excludedLocations),countries:csv(p.countries),minCompanySize:p.minCompanySize==null?undefined:Number(p.minCompanySize),maxCompanySize:p.maxCompanySize==null?undefined:Number(p.maxCompanySize),workModes:csv(p.workModes),employmentTypes:csv(p.employmentTypes),thresholds:{manual:Number(p.manualThreshold??70),auto:Number(p.autoThreshold??80)}};const sourceConfig=sources.filter((x:any)=>x.enabled!==false).map((x:any)=>({name:x.name,kind:x.kind,company:x.company,region:x.region||undefined,enabled:true,...(x.kind==='greenhouse'?{boardToken:x.boardKey}:x.kind==='lever'?{site:x.boardKey}:x.kind==='ashby'?{boardName:x.boardKey}:{url:x.boardKey})}));await orchestratorJson('/api/config',{method:'POST',body:{profile,preferences,sources:sourceConfig}})};
-export type Snapshot={summary:Record<string,number>;jobs:any[];runs:any[];updatedAt?:string};export const refreshSnapshot=async():Promise<Snapshot>=>{const snapshot=await orchestratorJson<Snapshot>('/api/snapshot');const client=new CoreApiClient() as any;const existing=await queryNodes(client,'jobOpportunities',{id:true,jobId:true});const byId=new Map(existing.map((x:any)=>[x.jobId,x]));for(const job of snapshot.jobs??[]){const data={title:job.title,jobId:job.jobId,company:job.company,status:job.crmStatus,approval:job.approval??'PENDING',fitScore:job.fitScore??undefined,source:job.source??'',locationText:(job.locations??[]).join(', '),workMode:job.workMode??'',employmentType:job.employmentType??'',jobUrl:job.applicationUrl??job.canonicalUrl??'',description:job.description??'',resumeHash:job.resumeHash??'',resumePath:job.resumePath??'',applicationEmail:job.applicationEmail??'',postedAt:job.postedAt||undefined,discoveredAt:job.discoveredAt||job.firstSeenAt||undefined,appliedAt:job.appliedAt||undefined,confirmation:job.confirmation?JSON.stringify(job.confirmation):''};const record:any=byId.get(job.jobId);if(record?.id)await client.mutation({updateJobOpportunity:{__args:{id:record.id,data},id:true}} as any);else{const result=await client.mutation({createJobOpportunity:{__args:{data},id:true}} as any);if(result?.createJobOpportunity?.id)byId.set(job.jobId,result.createJobOpportunity)}}return snapshot};
+import { CoreApiClient } from 'twenty-client-sdk/core';
+import { orchestratorJson } from './orchestrator';
+
+const csv = (value?: string | null) => String(value ?? '').split(',').map((item) => item.trim()).filter(Boolean);
+const sourceKind = (value?: string | null) => String(value ?? '').toLowerCase().replace(/_/g, '-');
+
+const queryNodes = async (client: any, plural: string, fields: any) => {
+  const result = await client.query({ [plural]: { __args: { first: 500 }, edges: { node: fields } } } as any);
+  return (result?.[plural]?.edges ?? []).map((edge: any) => edge.node);
+};
+
+export const pushWorkspaceConfigToOrchestrator = async () => {
+  const client = new CoreApiClient() as any;
+  const [profiles, evidences, exclusions, sources] = await Promise.all([
+    queryNodes(client, 'candidateProfiles', {
+      id: true, name: true, email: true, phone: true, location: true, linkedin: true, github: true, portfolio: true,
+      currentCompany: true, knowledgeBase: true, professionalSummary: true, workProgress: true, targetTitles: true,
+      excludedTitles: true, targetSkills: true, excludedLocations: true, countries: true, minCompanySize: true,
+      maxCompanySize: true, workModes: true, employmentTypes: true, manualThreshold: true, autoThreshold: true,
+      authorizations: true
+    }),
+    queryNodes(client, 'careerEvidences', {
+      id: true, title: true, evidenceType: true, organization: true, fact: true, skills: true, evidenceUrl: true, verified: true
+    }),
+    queryNodes(client, 'excludedCompanies', { name: true, aliases: true }),
+    queryNodes(client, 'jobSources', { name: true, kind: true, company: true, boardKey: true, region: true, enabled: true })
+  ]);
+
+  const profileRow = profiles[0];
+  if (!profileRow) throw new Error('Create a Candidate Profile before running automation.');
+
+  const excluded: any[] = exclusions.map((item: any) => ({ name: item.name, aliases: csv(item.aliases) }));
+  if (profileRow.currentCompany?.trim()) excluded.push(profileRow.currentCompany.trim());
+
+  const verified = evidences.filter((item: any) => item.verified && item.fact);
+  const education = verified
+    .filter((item: any) => String(item.evidenceType || '').toUpperCase() === 'EDUCATION')
+    .map((item: any) => ({ degree: item.title || '', institution: item.organization || '', evidenceId: `crm-${item.id}` }));
+
+  const profile = {
+    version: `twenty-${new Date().toISOString()}`,
+    identity: {
+      name: profileRow.name,
+      email: profileRow.email,
+      phone: profileRow.phone,
+      location: profileRow.location,
+      linkedin: profileRow.linkedin,
+      github: profileRow.github,
+      portfolio: profileRow.portfolio
+    },
+    context: {
+      professionalSummary: profileRow.professionalSummary || '',
+      workProgress: profileRow.workProgress || '',
+      knowledgeBase: profileRow.knowledgeBase || ''
+    },
+    eligibility: { authorizations: csv(profileRow.authorizations) },
+    education,
+    evidence: verified.map((item: any) => ({
+      id: `crm-${item.id}`,
+      title: item.title || null,
+      type: String(item.evidenceType || 'OTHER').toLowerCase(),
+      fact: item.fact,
+      organization: item.organization || null,
+      skills: csv(item.skills),
+      evidenceUrl: item.evidenceUrl || null,
+      verified: true
+    }))
+  };
+
+  const preferences = {
+    targetTitles: csv(profileRow.targetTitles),
+    excludedTitles: csv(profileRow.excludedTitles),
+    targetSkills: csv(profileRow.targetSkills),
+    excludedCompanies: excluded,
+    excludedLocations: csv(profileRow.excludedLocations),
+    countries: csv(profileRow.countries),
+    minCompanySize: profileRow.minCompanySize == null ? undefined : Number(profileRow.minCompanySize),
+    maxCompanySize: profileRow.maxCompanySize == null ? undefined : Number(profileRow.maxCompanySize),
+    workModes: csv(profileRow.workModes),
+    employmentTypes: csv(profileRow.employmentTypes),
+    thresholds: { manual: Number(profileRow.manualThreshold ?? 70), auto: Number(profileRow.autoThreshold ?? 80) }
+  };
+
+  const sourceConfig = sources
+    .filter((item: any) => item.enabled !== false)
+    .map((item: any) => {
+      const kind = sourceKind(item.kind);
+      return {
+        name: item.name,
+        kind,
+        company: item.company,
+        region: item.region || undefined,
+        enabled: true,
+        ...(kind === 'greenhouse' ? { boardToken: item.boardKey }
+          : kind === 'lever' ? { site: item.boardKey }
+            : kind === 'ashby' ? { boardName: item.boardKey }
+              : { url: item.boardKey })
+      };
+    });
+
+  await orchestratorJson('/api/config', { method: 'POST', body: { profile, preferences, sources: sourceConfig } });
+};
+
+export type Snapshot = { summary: Record<string, number>; jobs: any[]; runs: any[]; updatedAt?: string };
+
+export const refreshSnapshot = async (): Promise<Snapshot> => {
+  const snapshot = await orchestratorJson<Snapshot>('/api/snapshot');
+  const client = new CoreApiClient() as any;
+  const existing = await queryNodes(client, 'jobOpportunities', { id: true, jobId: true });
+  const byId = new Map(existing.map((item: any) => [item.jobId, item]));
+
+  for (const job of snapshot.jobs ?? []) {
+    const data = {
+      title: job.title,
+      jobId: job.jobId,
+      company: job.company,
+      status: job.crmStatus,
+      approval: job.approval ?? 'PENDING',
+      fitScore: job.fitScore ?? undefined,
+      source: job.source ?? '',
+      locationText: (job.locations ?? []).join(', '),
+      workMode: job.workMode ?? '',
+      employmentType: job.employmentType ?? '',
+      jobUrl: job.applicationUrl ?? job.canonicalUrl ?? '',
+      description: job.description ?? '',
+      resumeHash: job.resumeHash ?? '',
+      resumePath: job.resumePath ?? '',
+      applicationEmail: job.applicationEmail ?? '',
+      postedAt: job.postedAt || undefined,
+      discoveredAt: job.discoveredAt || job.firstSeenAt || undefined,
+      appliedAt: job.appliedAt || undefined,
+      confirmation: job.confirmation ? JSON.stringify(job.confirmation) : ''
+    };
+    const record: any = byId.get(job.jobId);
+    if (record?.id) {
+      await client.mutation({ updateJobOpportunity: { __args: { id: record.id, data }, id: true } } as any);
+    } else {
+      const result = await client.mutation({ createJobOpportunity: { __args: { data }, id: true } } as any);
+      if (result?.createJobOpportunity?.id) byId.set(job.jobId, result.createJobOpportunity);
+    }
+  }
+
+  return snapshot;
+};
