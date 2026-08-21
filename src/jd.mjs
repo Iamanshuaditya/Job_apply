@@ -56,7 +56,9 @@ export function analyzeJD(job) {
       : { category: r.category || categoryForLine(r.requirement || '', r.skills || []), kind: r.kind || 'must-have', skills: r.skills || [], ...r })
     : extractRequirements(corpus);
   return {
-    roleFamily: inferRoleFamily(corpus),
+    // Title only: JD bodies routinely say "partner with sales", "go-to-market",
+    // "mobile and web", which misclassifies engineering roles and hard-fails them.
+    roleFamily: inferRoleFamily(job.title),
     title: job.title,
     seniority: inferSeniority(job.title),
     workMode: job.workMode,
