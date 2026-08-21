@@ -2,6 +2,7 @@ import { assert, sha256, uniq } from './utils.mjs';
 
 export function canonicalizeUrl(value) {
   const url = new URL(value);
+  assert(url.protocol === 'https:', 'job URL must use https');
   for (const key of [...url.searchParams.keys()]) {
     if (/^(utm_|ref$|ref_|source$|src$|gh_src$)/i.test(key)) url.searchParams.delete(key);
   }
