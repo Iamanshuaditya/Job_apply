@@ -42,3 +42,14 @@ jobs:
       - run: yarn typecheck
       - run: yarn lint
       - run: yarn twenty build
+      - name: Verify dashboard is present in Twenty manifest
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const manifest = fs.readFileSync('.twenty/output/manifest.json', 'utf8');
+          const dashboardId = '18fd30f0-4330-5d01-9081-277717155743';
+          if (!manifest.includes(dashboardId) && !manifest.includes('job-search-dashboard')) {
+            console.error(manifest);
+            throw new Error('Twenty build completed without the job-search dashboard front component.');
+          }
+          NODE
