@@ -6,17 +6,51 @@ import path from 'node:path';
 const htmlEscape = (value = '') => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const safeHref = (value) => { try { const url = new URL(value); return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol) ? url.toString() : null; } catch { return null; } };
 const link = (label, href) => href ? `<a href="${htmlEscape(href)}">${htmlEscape(label)}</a>` : htmlEscape(label);
+const periodOf = (item = {}) => item.period || item.dates || item.date || '';
+
+const sectionClaims = (resume, key, type) => resume[key] || (resume.claims || []).filter((claim) => claim.type === type);
 
 export function resumeLines(resume) {
-  return [
+  const experience = sectionClaims(resume, 'experience', 'experience');
+  const projects = sectionClaims(resume, 'projects', 'project');
+  const achievements = sectionClaims(resume, 'achievements', 'achievement');
+  const additional = (resume.claims || []).filter((claim) => !['experience', 'project', 'achievement'].includes(claim.type));
+  const lines = [
     resume.identity.name,
-    [resume.identity.email, resume.identity.phone, resume.identity.location].filter(Boolean).join(' | '),
-    'TARGETED SUMMARY', resume.summary.text,
-    'TECHNICAL SKILLS', resume.skills.join(' | '),
-    'EXPERIENCE / PROJECT EVIDENCE', ...resume.claims.map((c) => `- ${c.text}`),
-    'EDUCATION', ...(resume.education.length ? resume.education.map((e) => `${e.degree || ''} ${e.institution || ''}`.trim()) : ['Available on request'])
-  ].filter(Boolean);
+    [resume.identity.email, resume.identity.phone, resume.identity.location].filter(Boolean).join(' | ')
+  ];
+  if (resume.skills?.length) lines.push('TECHNICAL SKILLS', resume.skills.join(' | '));
+  if (experience.length) lines.push('EXPERIENCE', ...experience.map((claim) => `- ${claim.text}`));
+  if (projects.length) lines.push('PROJECTS', ...projects.map((claim) => `- ${claim.text}`));
+  if (achievements.length) lines.push('ACHIEVEMENTS', ...achievements.map((claim) => `- ${claim.text}`));
+  if (additional.length) lines.push('ADDITIONAL', ...additional.map((claim) => `- ${claim.text}`));
+  if (resume.education?.length) lines.push('EDUCATION', ...resume.education.map((item) => `${item.degree || item.title || ''} ${item.institution || item.organization || ''} ${periodOf(item)}`.trim()));
+  return lines.filter(Boolean);
 }
+
+const experienceGroups = (claims) => {
+  const groups = [];
+  const byKey = new Map();
+  for (const claim of claims) {
+    const key = [claim.organization || '', claim.title || '', claim.period || '', claim.location || ''].join('|');
+    let group = byKey.get(key);
+    if (!group) {
+      group = {
+        organization: claim.organization || 'Experience',
+        title: claim.title || '',
+        period: claim.period || '',
+        location: claim.location || '',
+        claims: []
+      };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.claims.push(claim);
+  }
+  return groups;
+};
+
+const renderSection = (title, body) => body ? `<section><h2>${title}</h2>${body}</section>` : '';
 
 function resumeHtml(resume) {
   const identity = resume.identity || {};
@@ -27,37 +61,74 @@ function resumeHtml(resume) {
     identity.linkedin ? link('LinkedIn', safeHref(identity.linkedin)) : null,
     identity.github ? link('GitHub', safeHref(identity.github)) : null,
     identity.portfolio ? link('Portfolio', safeHref(identity.portfolio)) : null
-  ].filter(Boolean).join('<span class="sep">•</span>');
-  const claims = resume.claims.map((claim) => `<li>${claim.organization ? `<div class="claim-head"><strong>${htmlEscape(claim.organization)}</strong>${claim.title ? `<span>${htmlEscape(claim.title)}</span>` : ''}</div>` : ''}<div>${htmlEscape(claim.text)}</div></li>`).join('');
-  const education = resume.education.length ? resume.education.map((item) => `<div class="education"><strong>${htmlEscape(item.degree || item.title || '')}</strong><span>${htmlEscape(item.institution || item.organization || '')}</span>${item.date || item.dates ? `<span class="date">${htmlEscape(item.date || item.dates)}</span>` : ''}</div>`).join('') : '<div class="muted">Available on request</div>';
+  ].filter(Boolean).join('<span class="sep">|</span>');
+
+  const skillGroups = Object.entries(resume.skillGroups || {}).filter(([, skills]) => Array.isArray(skills) && skills.length);
+  const skillBody = skillGroups.length
+    ? skillGroups.map(([group, skills]) => `<div class="skill-row"><strong>${htmlEscape(group)}:</strong><span>${skills.map(htmlEscape).join(', ')}</span></div>`).join('')
+    : (resume.skills?.length ? `<div class="skill-row"><strong>Technologies:</strong><span>${resume.skills.map(htmlEscape).join(', ')}</span></div>` : '');
+
+  const experience = sectionClaims(resume, 'experience', 'experience');
+  const experienceBody = experienceGroups(experience).map((group) => `
+    <div class="entry">
+      <div class="entry-row"><strong>${htmlEscape(group.organization)}</strong><strong class="right">${htmlEscape(group.period)}</strong></div>
+      <div class="entry-row sub"><em>${htmlEscape(group.title)}</em><em class="right">${htmlEscape(group.location)}</em></div>
+      <ul>${group.claims.map((claim) => `<li>${htmlEscape(claim.text)}</li>`).join('')}</ul>
+    </div>`).join('');
+
+  const projects = sectionClaims(resume, 'projects', 'project');
+  const projectBody = projects.map((claim) => {
+    const name = claim.title || claim.organization || 'Project';
+    const href = safeHref(claim.evidenceUrl);
+    const skills = (claim.skills || []).join(', ');
+    return `<div class="entry project">
+      <div class="entry-row"><strong>${link(name, href)}</strong><strong class="right">${htmlEscape(claim.period || '')}</strong></div>
+      ${skills ? `<div class="project-tech">${htmlEscape(skills)}</div>` : ''}
+      <ul><li>${htmlEscape(claim.text)}</li></ul>
+    </div>`;
+  }).join('');
+
+  const achievements = sectionClaims(resume, 'achievements', 'achievement');
+  const achievementBody = achievements.length ? `<ul>${achievements.map((claim) => `<li>${htmlEscape(claim.text)}${claim.period ? ` <span class="inline-date">(${htmlEscape(claim.period)})</span>` : ''}</li>`).join('')}</ul>` : '';
+
+  const additional = (resume.claims || []).filter((claim) => !['experience', 'project', 'achievement'].includes(claim.type));
+  const additionalBody = additional.length ? `<ul>${additional.map((claim) => `<li>${htmlEscape(claim.text)}</li>`).join('')}</ul>` : '';
+
+  const educationBody = (resume.education || []).map((item) => `
+    <div class="entry education">
+      <div class="entry-row"><strong>${htmlEscape(item.institution || item.organization || '')}</strong><strong class="right">${htmlEscape(periodOf(item))}</strong></div>
+      <div class="entry-row sub"><em>${htmlEscape(item.degree || item.title || '')}</em><em class="right">${htmlEscape(item.location || '')}</em></div>
+    </div>`).join('');
+
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-    @page { size: A4; margin: 13mm 15mm 14mm; }
+    @page { size: A4; margin: 11.5mm 14mm 12mm; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 9.6pt; line-height: 1.28; overflow-wrap: anywhere; }
-    a { color: inherit; text-decoration: underline; text-decoration-thickness: .5px; text-underline-offset: 1.5px; }
-    header { text-align: center; margin-bottom: 10px; }
-    h1 { font-size: 19pt; letter-spacing: .2px; margin: 0 0 4px; font-weight: 700; }
-    .contacts { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px 7px; font-size: 8.7pt; }
-    .sep { color: #777; }
-    section { margin-top: 9px; break-inside: auto; }
-    h2 { font-size: 10pt; margin: 0 0 5px; padding-bottom: 2px; border-bottom: 1px solid #222; letter-spacing: .55px; font-weight: 700; }
-    p { margin: 0; }
-    .skills { display: flex; flex-wrap: wrap; gap: 3px 6px; }
-    .skill:not(:last-child)::after { content: ' •'; color: #777; }
-    ul { margin: 0; padding-left: 16px; }
-    li { margin: 0 0 5px; break-inside: avoid; }
-    .claim-head, .education { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: baseline; margin-bottom: 1px; }
-    .claim-head span, .education span { text-align: right; color: #333; font-style: italic; }
-    .education { position: relative; margin-bottom: 4px; }
-    .education .date { grid-column: 2; }
-    .muted { color: #555; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 9.2pt; line-height: 1.23; overflow-wrap: anywhere; }
+    a { color: inherit; text-decoration: underline; text-decoration-thickness: .45px; text-underline-offset: 1px; }
+    header { text-align: center; margin-bottom: 6px; }
+    h1 { font-size: 19pt; line-height: 1.05; margin: 0 0 3px; font-weight: 700; letter-spacing: .2px; }
+    .contacts { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 8.35pt; }
+    .sep { color: #555; }
+    section { margin-top: 7px; }
+    h2 { font-size: 9.6pt; margin: 0 0 3px; padding-bottom: 1px; border-bottom: .8px solid #111; letter-spacing: .45px; font-weight: 700; }
+    .skill-row { display: grid; grid-template-columns: 31mm minmax(0, 1fr); gap: 4px; margin: 1px 0; }
+    .entry { margin: 0 0 4px; break-inside: avoid; }
+    .entry-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline; }
+    .entry-row.sub { margin-top: 0; font-size: 8.8pt; }
+    .right { text-align: right; white-space: nowrap; }
+    ul { margin: 1px 0 0; padding-left: 15px; }
+    li { margin: 0 0 1.5px; }
+    .project-tech { font-size: 8.55pt; font-style: italic; margin-top: 0; }
+    .inline-date { color: #444; font-size: 8.5pt; }
   </style></head><body>
     <header><h1>${htmlEscape(identity.name || '')}</h1><div class="contacts">${contacts}</div></header>
-    <section><h2>TARGETED SUMMARY</h2><p>${htmlEscape(resume.summary.text)}</p></section>
-    <section><h2>TECHNICAL SKILLS</h2><div class="skills">${resume.skills.map((skill) => `<span class="skill">${htmlEscape(skill)}</span>`).join('')}</div></section>
-    <section><h2>EXPERIENCE / PROJECT EVIDENCE</h2><ul>${claims}</ul></section>
-    <section><h2>EDUCATION</h2>${education}</section>
+    ${renderSection('TECHNICAL SKILLS', skillBody)}
+    ${renderSection('EXPERIENCE', experienceBody)}
+    ${renderSection('PROJECTS', projectBody)}
+    ${renderSection('ACHIEVEMENTS', achievementBody)}
+    ${renderSection('ADDITIONAL', additionalBody)}
+    ${renderSection('EDUCATION', educationBody)}
   </body></html>`;
 }
 
@@ -95,15 +166,23 @@ export async function extractPdfText(file) {
   try { return stripHtml(await readFile(sourceFileFor(file), 'utf8')); }
   catch {
     const pdf = await readFile(file, 'latin1');
-    return [...pdf.matchAll(/\((.*?)(?<!\\)\) Tj/g)].map((m) => m[1].replace(/\\([()\\])/g, '$1')).join('\n');
+    return [...pdf.matchAll(/\((.*?)(?<!\\)\) Tj/g)].map((match) => match[1].replace(/\\([()\\])/g, '$1')).join('\n');
   }
 }
 
 export async function validatePdf(file, resume) {
   const buf = await readFile(file);
   const text = await extractPdfText(file);
-  const required = [resume.identity.name, 'TARGETED SUMMARY', 'TECHNICAL SKILLS', 'EXPERIENCE / PROJECT EVIDENCE', 'EDUCATION'];
-  const missing = required.filter((x) => !text.includes(x));
+  const experience = sectionClaims(resume, 'experience', 'experience');
+  const projects = sectionClaims(resume, 'projects', 'project');
+  const achievements = sectionClaims(resume, 'achievements', 'achievement');
+  const required = [resume.identity.name];
+  if (resume.skills?.length) required.push('TECHNICAL SKILLS');
+  if (experience.length) required.push('EXPERIENCE');
+  if (projects.length) required.push('PROJECTS');
+  if (achievements.length) required.push('ACHIEVEMENTS');
+  if (resume.education?.length) required.push('EDUCATION');
+  const missing = required.filter((value) => !text.includes(value));
   let layout = { horizontalOverflow: false, textLength: text.length };
   try { layout = JSON.parse(await readFile(layoutFileFor(file), 'utf8')); } catch {}
   const pdfText = buf.toString('latin1');
