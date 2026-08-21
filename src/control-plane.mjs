@@ -216,9 +216,17 @@ export class JobControlPlane {
   }
 
   async snapshot() {
-    const [summary, jobs, runs] = await Promise.all([
-      this.jobs.summary(), this.jobs.list({ limit: 300 }), readJson(this.runsFile, { runs: [] })
+    // The job list is capped, so it must be ordered by what the reviewer can act
+    // on. Sorting purely by date lets thousands of FILTERED_OUT rows crowd the
+    // review queue out of the window, which shows up as an empty dashboard.
+    const NOISE = ['FILTERED_OUT', 'CLOSED'];
+    const [summary, actionable, recent, runs] = await Promise.all([
+      this.jobs.summary(),
+      this.jobs.list({ limit: 1000 }).then((rows) => rows.filter((job) => !NOISE.includes(job.crmStatus))),
+      this.jobs.list({ limit: 300 }).then((rows) => rows.filter((job) => NOISE.includes(job.crmStatus))),
+      readJson(this.runsFile, { runs: [] })
     ]);
+    const jobs = [...actionable, ...recent.slice(0, Math.max(0, 300 - actionable.length))];
     return { summary, jobs, runs: runs.runs.slice(0, 30), updatedAt: new Date().toISOString() };
   }
 }

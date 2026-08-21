@@ -60,7 +60,15 @@ export function scoreFit({ job, analysis, matchedRequirements, preferences = {} 
   const mustRows = matchedRequirements.filter((r) => r.kind !== 'nice-to-have');
   const mustHaveCoverage = coverage(mustRows) ?? 1;
   const thresholds = { manual: 70, auto: 80, minimumMustHaveCoverage: 0.7, ...(preferences.thresholds || {}) };
-  const insufficientCoverage = mustRows.length > 0 && mustHaveCoverage < thresholds.minimumMustHaveCoverage;
+  // Requirements are keyword-extracted from JD prose, so long stacks make a flat
+  // coverage bar unreachable. Relax it as the list grows, and never let coverage
+  // alone veto a job whose weighted score already clears the manual threshold.
+  const requiredCoverage = mustRows.length > 8
+    ? Math.max(0.25, thresholds.minimumMustHaveCoverage * (8 / mustRows.length))
+    : thresholds.minimumMustHaveCoverage;
+  const insufficientCoverage = mustRows.length > 0
+    && mustHaveCoverage < requiredCoverage
+    && score < thresholds.manual;
   const route = hardFailures.length || insufficientCoverage ? 'skip' : score >= thresholds.auto ? 'qualified' : score >= thresholds.manual ? 'review' : 'skip';
   return { score, dimensions, mustHaveCoverage, hardFailures, insufficientCoverage, route, roleFamily: analysis.roleFamily };
 }

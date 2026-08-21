@@ -10,3 +10,12 @@ candidate/private/
 applications.ndjson
 outcomes.ndjson
 attention.ndjson
+
+# personal data / local infra
+candidate/profile.json
+candidate/preferences.json
+config/sources.json
+.job-apply/
+.twenty-server/
+apps/twenty-job-search-crm/.twenty/
+apps/twenty-job-search-crm/.yarn/
