@@ -11,7 +11,7 @@ export default defineObject({
   icon: 'IconDatabase',
   labelIdentifierFieldMetadataUniversalIdentifier: IDS.career_evidence_title_field,
   fields: [
-    { universalIdentifier: IDS.career_evidence_title_field, type: FieldType.TEXT, name: 'title', label: 'Title' },
+    { universalIdentifier: IDS.career_evidence_title_field, type: FieldType.TEXT, name: 'title', label: 'Title / role' },
     {
       universalIdentifier: IDS.career_evidence_type_field,
       type: FieldType.SELECT,
@@ -29,6 +29,8 @@ export default defineObject({
       ]
     },
     { universalIdentifier: IDS.career_evidence_organization_field, type: FieldType.TEXT, name: 'organization', label: 'Company / project' },
+    { universalIdentifier: '4d6cc677-b206-463e-a327-e205558482bc', type: FieldType.TEXT, name: 'period', label: 'Dates / period' },
+    { universalIdentifier: '5a01af63-81d8-46c4-ad71-13e8b16f75de', type: FieldType.TEXT, name: 'location', label: 'Location' },
     { universalIdentifier: IDS.career_evidence_fact_field, type: FieldType.TEXT, name: 'fact', label: 'Verified fact' },
     { universalIdentifier: IDS.career_evidence_skills_field, type: FieldType.TEXT, name: 'skills', label: 'Skills' },
     { universalIdentifier: IDS.career_evidence_evidenceUrl_field, type: FieldType.TEXT, name: 'evidenceUrl', label: 'Evidence URL' },
