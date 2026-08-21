@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { RestApiClient } from 'twenty-client-sdk/rest';
 import { defineFrontComponent } from 'twenty-sdk/define';
@@ -70,6 +70,11 @@ type ConfirmState = {
   danger?: boolean;
 } | null;
 
+type ResumeTicket = {
+  url: string;
+  expiresAt: string;
+};
+
 const api = new RestApiClient();
 const PAGE_SIZE = 25;
 
@@ -115,6 +120,31 @@ const statusGroup = (key: string, status: string) =>
   (key === 'attention' && ['ATTENTION_REQUIRED', 'FAILED', 'SUBMISSION_UNCONFIRMED'].includes(status));
 
 const fmtDate = (value?: string | null) => (value ? new Date(value).toLocaleString() : '—');
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+
+const safeHttpsUrl = (value?: string | null) => {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+};
+
+const safeResumeUrl = (value?: string | null) => {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:') return url.toString();
+    if (url.protocol === 'http:' && ['localhost', '127.0.0.1', '::1', 'host.docker.internal'].includes(url.hostname)) return url.toString();
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const jobHref = (job: Job) => safeHttpsUrl(job.applicationUrl) || safeHttpsUrl(job.canonicalUrl);
 
 const styles: Record<string, CSSProperties> = {
   shell: {
@@ -237,6 +267,8 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: 10,
   },
   loading: { padding: 32, textAlign: 'center', color: 'var(--t-color-gray-55)' },
+  skeleton: { display: 'grid', gap: 8, padding: 12 },
+  skeletonRow: { height: 42, borderRadius: 7, background: 'var(--t-color-gray-10)', border: '1px solid var(--t-color-gray-15)' },
   footer: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -304,6 +336,39 @@ const pill = (status: string): CSSProperties => {
   };
 };
 
+const ResumePreviewLink = ({ jobId, resumeHash }: { jobId: string; resumeHash: string }) => {
+  const [ticket, setTicket] = useState<ResumeTicket | null>(null);
+  const [previewError, setPreviewError] = useState('');
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setTicket(null);
+    setPreviewError('');
+    api.get<ResumeTicket>(`/s/job-search/resume?jobId=${encodeURIComponent(jobId)}`)
+      .then((result) => {
+        if (!active) return;
+        const safe = safeResumeUrl(result.url);
+        if (!safe) throw new Error('Preview URL was rejected as unsafe.');
+        setTicket({ ...result, url: safe });
+      })
+      .catch((caught) => {
+        if (active) setPreviewError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => { active = false; };
+  }, [jobId, resumeHash, attempt]);
+
+  if (ticket) return <a style={styles.link} href={ticket.url} target="_blank" rel="noreferrer">Preview exact PDF</a>;
+  if (previewError) {
+    return (
+      <button type="button" style={styles.button} title={previewError} onClick={() => setAttempt((value) => value + 1)}>
+        Retry preview
+      </button>
+    );
+  }
+  return <span style={styles.muted}>Preparing preview…</span>;
+};
+
 const Dashboard = () => {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -318,6 +383,9 @@ const Dashboard = () => {
   const [prepareLimit, setPrepareLimit] = useState(100);
   const [applyLimit, setApplyLimit] = useState(20);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const backgroundRef = useRef<HTMLDivElement | null>(null);
+  const confirmInvokerRef = useRef<HTMLElement | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -335,13 +403,54 @@ const Dashboard = () => {
     void refresh();
   }, []);
 
+  const closeConfirm = () => {
+    setConfirm(null);
+    queueMicrotask(() => confirmInvokerRef.current?.focus());
+  };
+
+  const openConfirm = (state: Exclude<ConfirmState, null>) => {
+    confirmInvokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConfirm(state);
+  };
+
   useEffect(() => {
-    if (!confirm) return undefined;
+    const background = backgroundRef.current;
+    if (!confirm) {
+      background?.removeAttribute('inert');
+      return undefined;
+    }
+    background?.setAttribute('inert', '');
+    const modal = modalRef.current;
+    const controls = () => Array.from(modal?.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? []);
+    controls()[0]?.focus();
     const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setConfirm(null);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeConfirm();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = controls();
+      if (!focusable.length) {
+        event.preventDefault();
+        modal?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
+    return () => {
+      document.removeEventListener('keydown', handler);
+      background?.removeAttribute('inert');
+    };
   }, [confirm]);
 
   const action = async (name: string, route: string, body: unknown = {}) => {
@@ -385,6 +494,10 @@ const Dashboard = () => {
   useEffect(() => setPage(1), [filter, query, sort]);
 
   const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
   const pageJobs = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const ids = [...selected];
   const allPageSelected = pageJobs.length > 0 && pageJobs.every((job) => selected.has(job.jobId));
@@ -419,307 +532,309 @@ const Dashboard = () => {
 
   return (
     <div style={styles.shell}>
-      <div style={styles.header}>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-color-gray-50)', letterSpacing: '.04em' }}>
-            JOB APPLY • CONTROL CENTER
+      <div ref={backgroundRef}>
+        <div style={styles.header}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-color-gray-50)', letterSpacing: '.04em' }}>
+              JOB APPLY • CONTROL CENTER
+            </div>
+            <h1 style={styles.title}>Your job search, in one queue.</h1>
+            <div style={styles.sub}>
+              Discover roles, filter by your actual targets, inspect why each job scored the way it did, review the exact hash-locked résumé, and only then approve submission.
+            </div>
           </div>
-          <h1 style={styles.title}>Your job search, in one queue.</h1>
-          <div style={styles.sub}>
-            Discover roles, filter by your actual targets, inspect why each job scored the way it did, review the exact hash-locked résumé, and only then approve submission.
-          </div>
+          <div style={{ ...pill('APPROVED'), padding: '7px 10px' }}>● Approval gate active</div>
         </div>
-        <div style={{ ...pill('APPROVED'), padding: '7px 10px' }}>● Approval gate active</div>
-      </div>
 
-      <div style={styles.gate}>
-        <strong>Find &amp; prepare</strong> discovers new jobs, filters them, scores fit, and builds a verified résumé for each match. <strong>It never submits an application.</strong> Submission only begins after approval and a separate confirmed Apply action.
-      </div>
+        <div style={styles.gate}>
+          <strong>Find &amp; prepare</strong> discovers new jobs, filters them, scores fit, and builds a verified résumé for each match. <strong>It never submits an application.</strong> Submission only begins after approval and a separate confirmed Apply action.
+        </div>
 
-      {error && (
-        <div role="alert" style={styles.error}>
-          <strong>Could not update the dashboard.</strong> {error}{' '}
-          <button type="button" style={{ ...styles.button, marginLeft: 8 }} onClick={() => void refresh()}>
-            Retry
+        {error && (
+          <div role="alert" style={styles.error}>
+            <strong>Could not update the dashboard.</strong> {error}{' '}
+            <button type="button" style={{ ...styles.button, marginLeft: 8 }} onClick={() => void refresh()}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        <div style={styles.metrics}>
+          {metric('discovered', 'New', snapshot?.summary?.discovered)}
+          {metric('awaiting', 'Awaiting review', snapshot?.summary?.awaitingApproval)}
+          {metric('approved', 'Approved', snapshot?.summary?.approved)}
+          {metric('applying', 'Applying', snapshot?.summary?.applying)}
+          {metric('submitted', 'Submitted', snapshot?.summary?.submitted)}
+          {metric('attention', 'Needs attention', (snapshot?.summary?.attention ?? 0) + (snapshot?.summary?.failed ?? 0))}
+        </div>
+
+        <div style={styles.toolbar}>
+          <button
+            style={styles.primary}
+            disabled={Boolean(busy)}
+            onClick={() => void action('run', '/s/job-search/run-all', { prepareLimit: clamp(prepareLimit, 1, 500) })}
+          >
+            {busy === 'run' ? 'Running discovery → scoring → résumés…' : 'Find & prepare'}
+          </button>
+          <label style={styles.muted}>
+            Prepare limit{' '}
+            <input
+              aria-label="Prepare limit"
+              style={{ ...styles.input, ...styles.number }}
+              type="number"
+              min={1}
+              max={500}
+              value={prepareLimit}
+              onChange={(event) => setPrepareLimit(clamp(Number(event.target.value) || 1, 1, 500))}
+            />
+          </label>
+          <button
+            style={styles.button}
+            disabled={!ids.length || Boolean(busy)}
+            onClick={() => void action('approve', '/s/job-search/approve', { jobIds: ids })}
+          >
+            Approve selected ({ids.length})
+          </button>
+          <button
+            style={styles.danger}
+            disabled={!ids.length || Boolean(busy)}
+            onClick={() =>
+              openConfirm({
+                title: `Reject ${ids.length} selected job${ids.length === 1 ? '' : 's'}?`,
+                body: 'Rejected jobs are closed and removed from this review queue. This does not submit anything.',
+                danger: true,
+                action: () => action('reject', '/s/job-search/reject', { jobIds: ids }),
+              })
+            }
+          >
+            Reject selected
+          </button>
+          <span style={{ flex: 1 }} />
+          <input
+            style={styles.input}
+            aria-label="Search jobs"
+            placeholder="Search company or role…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <select style={styles.input} aria-label="Sort jobs" value={sort} onChange={(event) => setSort(event.target.value)}>
+            <option value="fit">Highest fit first</option>
+            <option value="recent">Newest first</option>
+          </select>
+          <button style={styles.button} disabled={loading || Boolean(busy)} onClick={() => void refresh()}>
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <label style={styles.muted}>
+            Apply limit{' '}
+            <input
+              aria-label="Apply limit"
+              style={{ ...styles.input, ...styles.number }}
+              type="number"
+              min={1}
+              max={100}
+              value={applyLimit}
+              onChange={(event) => setApplyLimit(clamp(Number(event.target.value) || 1, 1, 100))}
+            />
+          </label>
+          <button
+            style={styles.primary}
+            disabled={Boolean(busy) || (snapshot?.summary?.approved ?? 0) === 0}
+            onClick={() =>
+              openConfirm({
+                title: 'Submit approved applications?',
+                body: `This starts the real browser submission queue for up to ${applyLimit} approved jobs. Reviewed résumé hashes are checked again before submission.`,
+                action: () => action('apply', '/s/job-search/apply-approved', { limit: clamp(applyLimit, 1, 100) }),
+              })
+            }
+          >
+            {busy === 'apply' ? 'Applying…' : `Apply approved (${snapshot?.summary?.approved ?? 0})`}
           </button>
         </div>
-      )}
 
-      <div style={styles.metrics}>
-        {metric('discovered', 'New', snapshot?.summary?.discovered)}
-        {metric('awaiting', 'Awaiting review', snapshot?.summary?.awaitingApproval)}
-        {metric('approved', 'Approved', snapshot?.summary?.approved)}
-        {metric('applying', 'Applying', snapshot?.summary?.applying)}
-        {metric('submitted', 'Submitted', snapshot?.summary?.submitted)}
-        {metric('attention', 'Needs attention', (snapshot?.summary?.attention ?? 0) + (snapshot?.summary?.failed ?? 0))}
-      </div>
-
-      <div style={styles.toolbar}>
-        <button
-          style={styles.primary}
-          disabled={Boolean(busy)}
-          onClick={() => void action('run', '/s/job-search/run-all', { prepareLimit })}
-        >
-          {busy === 'run' ? 'Running discovery → scoring → résumés…' : 'Find & prepare'}
-        </button>
-        <label style={styles.muted}>
-          Prepare limit{' '}
-          <input
-            aria-label="Prepare limit"
-            style={{ ...styles.input, ...styles.number }}
-            type="number"
-            min={1}
-            max={500}
-            value={prepareLimit}
-            onChange={(event) => setPrepareLimit(Math.max(1, Number(event.target.value) || 1))}
-          />
-        </label>
-        <button
-          style={styles.button}
-          disabled={!ids.length || Boolean(busy)}
-          onClick={() => void action('approve', '/s/job-search/approve', { jobIds: ids })}
-        >
-          Approve selected ({ids.length})
-        </button>
-        <button
-          style={styles.danger}
-          disabled={!ids.length || Boolean(busy)}
-          onClick={() =>
-            setConfirm({
-              title: `Reject ${ids.length} selected job${ids.length === 1 ? '' : 's'}?`,
-              body: 'Rejected jobs are closed and removed from this review queue. This does not submit anything.',
-              danger: true,
-              action: () => action('reject', '/s/job-search/reject', { jobIds: ids }),
-            })
-          }
-        >
-          Reject selected
-        </button>
-        <span style={{ flex: 1 }} />
-        <input
-          style={styles.input}
-          aria-label="Search jobs"
-          placeholder="Search company or role…"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <select style={styles.input} aria-label="Sort jobs" value={sort} onChange={(event) => setSort(event.target.value)}>
-          <option value="fit">Highest fit first</option>
-          <option value="recent">Newest first</option>
-        </select>
-        <button style={styles.button} disabled={loading || Boolean(busy)} onClick={() => void refresh()}>
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
-        <label style={styles.muted}>
-          Apply limit{' '}
-          <input
-            aria-label="Apply limit"
-            style={{ ...styles.input, ...styles.number }}
-            type="number"
-            min={1}
-            max={100}
-            value={applyLimit}
-            onChange={(event) => setApplyLimit(Math.max(1, Number(event.target.value) || 1))}
-          />
-        </label>
-        <button
-          style={styles.primary}
-          disabled={Boolean(busy) || (snapshot?.summary?.approved ?? 0) === 0}
-          onClick={() =>
-            setConfirm({
-              title: 'Submit approved applications?',
-              body: `This starts the real browser submission queue for up to ${applyLimit} approved jobs. Reviewed résumé hashes are checked again before submission.`,
-              action: () => action('apply', '/s/job-search/apply-approved', { limit: applyLimit }),
-            })
-          }
-        >
-          {busy === 'apply' ? 'Applying…' : `Apply approved (${snapshot?.summary?.approved ?? 0})`}
-        </button>
-      </div>
-
-      <div style={styles.tableWrap}>
-        <table style={styles.table}>
-          <caption style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden' }}>Job review queue</caption>
-          <thead>
-            <tr>
-              <th style={styles.th} scope="col">
-                <input
-                  aria-label="Select all jobs on this page"
-                  type="checkbox"
-                  checked={allPageSelected}
-                  onChange={(event) => togglePageSelection(event.target.checked)}
-                />
-              </th>
-              <th style={styles.th} scope="col">Company / role</th>
-              <th style={styles.th} scope="col">Fit</th>
-              <th style={styles.th} scope="col">Status</th>
-              <th style={styles.th} scope="col">Résumé</th>
-              <th style={styles.th} scope="col">Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pageJobs.map((job) => (
-              <Fragment key={job.jobId}>
-                <tr>
-                  <td style={styles.td}>
-                    <input
-                      aria-label={`Select ${job.title} at ${job.company}`}
-                      type="checkbox"
-                      checked={selected.has(job.jobId)}
-                      onChange={(event) => toggleJobSelection(job.jobId, event.target.checked)}
-                    />
-                  </td>
-                  <td style={styles.td}>
-                    <div style={styles.company}>{job.company}</div>
-                    <div style={styles.muted}>
-                      {job.applicationUrl || job.canonicalUrl ? (
-                        <a style={styles.link} href={job.applicationUrl || job.canonicalUrl} target="_blank" rel="noreferrer">
-                          {job.title} ↗
-                        </a>
-                      ) : job.title}
-                      {job.locations?.length ? ` · ${job.locations.join(', ')}` : ''}
-                      {job.workMode ? ` · ${job.workMode}` : ''}
-                    </div>
-                  </td>
-                  <td style={styles.td}>
-                    <strong>{job.fitScore ?? '—'}</strong>
-                    {job.mustHaveCoverage != null && (
-                      <div style={styles.muted}>{Math.round(job.mustHaveCoverage * 100)}% must-have</div>
-                    )}
-                  </td>
-                  <td style={styles.td}>
-                    <span style={pill(job.crmStatus)}>{statusLabel(job.crmStatus)}</span>
-                  </td>
-                  <td style={styles.td}>
-                    {job.resumeHash ? (
-                      <>
-                        <a
-                          style={styles.link}
-                          href={`/s/job-search/resume?jobId=${encodeURIComponent(job.jobId)}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Preview exact PDF
-                        </a>
-                        <div style={styles.muted} title={job.resumeHash}>SHA-256 {job.resumeHash.slice(0, 12)}…</div>
-                      </>
-                    ) : (
-                      <span style={styles.muted}>Not generated yet</span>
-                    )}
-                  </td>
-                  <td style={styles.td}>
-                    <button
-                      type="button"
-                      style={styles.button}
-                      aria-expanded={expanded === job.jobId}
-                      onClick={() => setExpanded(expanded === job.jobId ? null : job.jobId)}
-                    >
-                      {expanded === job.jobId ? 'Hide' : 'Explain'}
-                    </button>
-                  </td>
-                </tr>
-
-                {expanded === job.jobId && (
-                  <tr>
-                    <td colSpan={6} style={{ padding: 0 }}>
-                      <div style={styles.detail}>
-                        <div style={styles.detailGrid}>
-                          <div style={styles.card}>
-                            <strong>Fit breakdown</strong>
-                            {job.fitDimensions ? (
-                              Object.entries(job.fitDimensions)
-                                .filter(([, dimension]) => dimension?.applicable)
-                                .map(([key, dimension]) => (
-                                  <div key={key} style={{ ...styles.muted, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                                    <span>{dimensionLabel(key)}</span>
-                                    <span>{dimension.ratio == null ? '—' : `${Math.round(dimension.ratio * 100)}%`}</span>
-                                  </div>
-                                ))
-                            ) : (
-                              <div style={styles.muted}>No breakdown available for older runs.</div>
-                            )}
-                            {job.hardFailures?.length ? (
-                              <div style={{ ...styles.muted, color: 'var(--t-color-red-70)', marginTop: 6 }}>
-                                Hard failures: {job.hardFailures.join(', ')}
-                              </div>
-                            ) : null}
-                          </div>
-
-                          <div style={styles.card}>
-                            <strong>Requirements</strong>
-                            {job.matchedRequirements?.length ? (
-                              job.matchedRequirements.slice(0, 8).map((requirement, index) => (
-                                <div
-                                  key={`${requirement.requirement}-${index}`}
-                                  style={{
-                                    ...styles.muted,
-                                    color: requirement.status === 'met' ? 'var(--t-color-green-70)' : 'var(--t-color-red-70)',
-                                  }}
-                                >
-                                  {requirement.status === 'met' ? '✓' : '○'} {requirement.requirement}
-                                </div>
-                              ))
-                            ) : (
-                              <div style={styles.muted}>No parsed requirements available for older runs.</div>
-                            )}
-                          </div>
-
-                          <div style={styles.card}>
-                            <strong>Source & timing</strong>
-                            <div style={styles.muted}>Source: {job.source || '—'}</div>
-                            <div style={styles.muted}>Posted: {fmtDate(job.postedAt)}</div>
-                            <div style={styles.muted}>Discovered: {fmtDate(job.discoveredAt)}</div>
-                            <div style={styles.muted}>Role family: {job.roleFamily || '—'}</div>
-                          </div>
+        <div style={styles.tableWrap}>
+          <table style={styles.table}>
+            <caption style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden' }}>Job review queue</caption>
+            <thead>
+              <tr>
+                <th style={styles.th} scope="col">
+                  <input
+                    aria-label="Select all jobs on this page"
+                    type="checkbox"
+                    checked={allPageSelected}
+                    onChange={(event) => togglePageSelection(event.target.checked)}
+                  />
+                </th>
+                <th style={styles.th} scope="col">Company / role</th>
+                <th style={styles.th} scope="col">Fit</th>
+                <th style={styles.th} scope="col">Status</th>
+                <th style={styles.th} scope="col">Résumé</th>
+                <th style={styles.th} scope="col">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageJobs.map((job) => {
+                const href = jobHref(job);
+                return (
+                  <Fragment key={job.jobId}>
+                    <tr>
+                      <td style={styles.td}>
+                        <input
+                          aria-label={`Select ${job.title} at ${job.company}`}
+                          type="checkbox"
+                          checked={selected.has(job.jobId)}
+                          onChange={(event) => toggleJobSelection(job.jobId, event.target.checked)}
+                        />
+                      </td>
+                      <td style={styles.td}>
+                        <div style={styles.company}>{job.company}</div>
+                        <div style={styles.muted}>
+                          {href ? (
+                            <a style={styles.link} href={href} target="_blank" rel="noreferrer">
+                              {job.title} ↗
+                            </a>
+                          ) : job.title}
+                          {job.locations?.length ? ` · ${job.locations.join(', ')}` : ''}
+                          {job.workMode ? ` · ${job.workMode}` : ''}
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                      </td>
+                      <td style={styles.td}>
+                        <strong>{job.fitScore ?? '—'}</strong>
+                        {job.mustHaveCoverage != null && (
+                          <div style={styles.muted}>{Math.round(job.mustHaveCoverage * 100)}% must-have</div>
+                        )}
+                      </td>
+                      <td style={styles.td}>
+                        <span style={pill(job.crmStatus)}>{statusLabel(job.crmStatus)}</span>
+                      </td>
+                      <td style={styles.td}>
+                        {job.resumeHash ? (
+                          <>
+                            <ResumePreviewLink jobId={job.jobId} resumeHash={job.resumeHash} />
+                            <div style={styles.muted} title={job.resumeHash}>SHA-256 {job.resumeHash.slice(0, 12)}…</div>
+                          </>
+                        ) : (
+                          <span style={styles.muted}>Not generated yet</span>
+                        )}
+                      </td>
+                      <td style={styles.td}>
+                        <button
+                          type="button"
+                          style={styles.button}
+                          aria-expanded={expanded === job.jobId}
+                          onClick={() => setExpanded(expanded === job.jobId ? null : job.jobId)}
+                        >
+                          {expanded === job.jobId ? 'Hide' : 'Explain'}
+                        </button>
+                      </td>
+                    </tr>
 
-        {loading && <div style={styles.loading}>Loading your job queue…</div>}
-        {!loading && !error && !pageJobs.length && (
-          <div style={styles.loading}>
-            {snapshot?.jobs?.length
-              ? 'No jobs match the current filters.'
-              : 'No jobs yet. Configure your profile and sources, then run Find & prepare.'}
-          </div>
-        )}
-      </div>
+                    {expanded === job.jobId && (
+                      <tr>
+                        <td colSpan={6} style={{ padding: 0 }}>
+                          <div style={styles.detail}>
+                            <div style={styles.detailGrid}>
+                              <div style={styles.card}>
+                                <strong>Fit breakdown</strong>
+                                {job.fitDimensions ? (
+                                  Object.entries(job.fitDimensions)
+                                    .filter(([, dimension]) => dimension?.applicable)
+                                    .map(([key, dimension]) => (
+                                      <div key={key} style={{ ...styles.muted, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                                        <span>{dimensionLabel(key)}</span>
+                                        <span>{dimension.ratio == null ? '—' : `${Math.round(dimension.ratio * 100)}%`}</span>
+                                      </div>
+                                    ))
+                                ) : (
+                                  <div style={styles.muted}>No breakdown available for older runs.</div>
+                                )}
+                                {job.hardFailures?.length ? (
+                                  <div style={{ ...styles.muted, color: 'var(--t-color-red-70)', marginTop: 6 }}>
+                                    Hard failures: {job.hardFailures.join(', ')}
+                                  </div>
+                                ) : null}
+                              </div>
 
-      <div style={styles.footer}>
-        <span>
-          Showing {visible.length ? (page - 1) * PAGE_SIZE + 1 : 0}–{Math.min(page * PAGE_SIZE, visible.length)} of {visible.length} matching jobs · last updated {fmtDate(snapshot?.updatedAt)}
-        </span>
-        <span>
-          <button style={styles.button} disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>{' '}
-          <span style={{ padding: '0 8px' }}>Page {page} / {pageCount}</span>{' '}
-          <button style={styles.button} disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button>
-        </span>
-      </div>
+                              <div style={styles.card}>
+                                <strong>Requirements</strong>
+                                {job.matchedRequirements?.length ? (
+                                  job.matchedRequirements.slice(0, 8).map((requirement, index) => (
+                                    <div
+                                      key={`${requirement.requirement}-${index}`}
+                                      style={{
+                                        ...styles.muted,
+                                        color: requirement.status === 'met' ? 'var(--t-color-green-70)' : 'var(--t-color-red-70)',
+                                      }}
+                                    >
+                                      {requirement.status === 'met' ? '✓' : '○'} {requirement.requirement}
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div style={styles.muted}>No parsed requirements available for older runs.</div>
+                                )}
+                              </div>
 
-      <div style={styles.runs}>
-        <strong>Recent runs</strong>
-        {snapshot?.runs?.length ? (
-          snapshot.runs.slice(0, 5).map((run) => (
-            <div key={run.id} style={styles.run}>
-              <span>{run.type}</span>
-              <span>
-                {run.status}
-                {run.processed != null ? ` · ${run.processed} processed` : ''}
-                {run.discovered != null ? ` · ${run.discovered} discovered` : ''}
-                {run.filtered != null ? ` · ${run.filtered} filtered` : ''}
-              </span>
-              <span>{fmtDate(run.finishedAt || run.startedAt)}</span>
+                              <div style={styles.card}>
+                                <strong>Source & timing</strong>
+                                <div style={styles.muted}>Source: {job.source || '—'}</div>
+                                <div style={styles.muted}>Posted: {fmtDate(job.postedAt)}</div>
+                                <div style={styles.muted}>Discovered: {fmtDate(job.discoveredAt)}</div>
+                                <div style={styles.muted}>Role family: {job.roleFamily || '—'}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {loading && (
+            <div style={styles.skeleton} aria-label="Loading jobs" aria-busy="true">
+              {Array.from({ length: 5 }, (_, index) => <div key={index} style={styles.skeletonRow} />)}
             </div>
-          ))
-        ) : (
-          <div style={styles.muted}>No runs recorded yet.</div>
-        )}
+          )}
+          {!loading && !error && !pageJobs.length && (
+            <div style={styles.loading}>
+              {snapshot?.jobs?.length
+                ? 'No jobs match the current filters.'
+                : 'No jobs yet. Configure your profile and sources, then run Find & prepare.'}
+            </div>
+          )}
+        </div>
+
+        <div style={styles.footer}>
+          <span>
+            Showing {visible.length ? (page - 1) * PAGE_SIZE + 1 : 0}–{Math.min(page * PAGE_SIZE, visible.length)} of {visible.length} matching jobs · last updated {fmtDate(snapshot?.updatedAt)}
+          </span>
+          <span>
+            <button style={styles.button} disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</button>{' '}
+            <span style={{ padding: '0 8px' }}>Page {page} / {pageCount}</span>{' '}
+            <button style={styles.button} disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>Next</button>
+          </span>
+        </div>
+
+        <div style={styles.runs}>
+          <strong>Recent runs</strong>
+          {snapshot?.runs?.length ? (
+            snapshot.runs.slice(0, 5).map((run) => (
+              <div key={run.id} style={styles.run}>
+                <span>{run.type}</span>
+                <span>
+                  {run.status}
+                  {run.processed != null ? ` · ${run.processed} processed` : ''}
+                  {run.discovered != null ? ` · ${run.discovered} discovered` : ''}
+                  {run.filtered != null ? ` · ${run.filtered} filtered` : ''}
+                </span>
+                <span>{fmtDate(run.finishedAt || run.startedAt)}</span>
+              </div>
+            ))
+          ) : (
+            <div style={styles.muted}>No runs recorded yet.</div>
+          )}
+        </div>
       </div>
 
       {confirm && (
@@ -727,19 +842,19 @@ const Dashboard = () => {
           style={styles.overlay}
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setConfirm(null);
+            if (event.target === event.currentTarget) closeConfirm();
           }}
         >
-          <div style={styles.modal} role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          <div ref={modalRef} tabIndex={-1} style={styles.modal} role="dialog" aria-modal="true" aria-labelledby="confirm-title">
             <h2 id="confirm-title" style={{ margin: '0 0 8px', fontSize: 18 }}>{confirm.title}</h2>
             <div style={styles.sub}>{confirm.body}</div>
             <div style={styles.modalActions}>
-              <button style={styles.button} autoFocus onClick={() => setConfirm(null)}>Cancel</button>
+              <button style={styles.button} onClick={closeConfirm}>Cancel</button>
               <button
                 style={confirm.danger ? styles.danger : styles.primary}
                 onClick={() => {
                   const run = confirm.action;
-                  setConfirm(null);
+                  closeConfirm();
                   void run();
                 }}
               >
