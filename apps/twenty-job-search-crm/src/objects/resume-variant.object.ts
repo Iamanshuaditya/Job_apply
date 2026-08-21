@@ -1,1 +1,23 @@
-import { defineObject, FieldType } from 'twenty-sdk/define'; import { IDS } from 'src/constants/ids'; export default defineObject({universalIdentifier:IDS.resume_variant_object,nameSingular:'resumeVariant',namePlural:'resumeVariants',labelSingular:'Resume Variant',labelPlural:'Resume Variants',description:'Exact verified resume prepared for a specific job.',icon:'IconFileTypePdf',labelIdentifierFieldMetadataUniversalIdentifier:IDS.resume_variant_name_field,fields:[{universalIdentifier:IDS.resume_variant_name_field,type:FieldType.TEXT,name:'name',label:'Name'},{universalIdentifier:IDS.resume_variant_jobId_field,type:FieldType.TEXT,name:'jobId',label:'Job ID'},{universalIdentifier:IDS.resume_variant_company_field,type:FieldType.TEXT,name:'company',label:'Company'},{universalIdentifier:IDS.resume_variant_role_field,type:FieldType.TEXT,name:'role',label:'Role'},{universalIdentifier:IDS.resume_variant_hash_field,type:FieldType.TEXT,name:'hash',label:'SHA-256'},{universalIdentifier:IDS.resume_variant_verificationStatus_field,type:FieldType.TEXT,name:'verificationStatus',label:'Truth verification'},{universalIdentifier:IDS.resume_variant_file_field,type:FieldType.FILES,name:'file',label:'Resume PDF',universalSettings:{maxNumberOfValues:1}},{universalIdentifier:IDS.resume_variant_createdAt_field,type:FieldType.DATE_TIME,name:'createdAt',label:'Created at'}]});
+import { defineObject, FieldType } from 'twenty-sdk/define';
+import { IDS } from 'src/constants/ids';
+
+export default defineObject({
+  universalIdentifier: IDS.resume_variant_object,
+  nameSingular: 'resumeVariant',
+  namePlural: 'resumeVariants',
+  labelSingular: 'Resume Variant',
+  labelPlural: 'Resume Variants',
+  description: 'Exact verified resume prepared for a specific job.',
+  icon: 'IconFileTypePdf',
+  labelIdentifierFieldMetadataUniversalIdentifier: IDS.resume_variant_name_field,
+  fields: [
+    { universalIdentifier: IDS.resume_variant_name_field, type: FieldType.TEXT, name: 'name', label: 'Name' },
+    { universalIdentifier: IDS.resume_variant_jobId_field, type: FieldType.TEXT, name: 'jobId', label: 'Job ID' },
+    { universalIdentifier: IDS.resume_variant_company_field, type: FieldType.TEXT, name: 'company', label: 'Company' },
+    { universalIdentifier: IDS.resume_variant_role_field, type: FieldType.TEXT, name: 'targetRole', label: 'Role' },
+    { universalIdentifier: IDS.resume_variant_hash_field, type: FieldType.TEXT, name: 'hash', label: 'SHA-256' },
+    { universalIdentifier: IDS.resume_variant_verificationStatus_field, type: FieldType.TEXT, name: 'verificationStatus', label: 'Truth verification' },
+    { universalIdentifier: IDS.resume_variant_file_field, type: FieldType.FILES, name: 'file', label: 'Resume PDF', universalSettings: { maxNumberOfValues: 1 } },
+    { universalIdentifier: IDS.resume_variant_createdAt_field, type: FieldType.DATE_TIME, name: 'generatedAt', label: 'Created at' }
+  ]
+});

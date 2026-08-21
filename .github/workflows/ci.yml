@@ -2,7 +2,12 @@ name: verify
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -15,6 +20,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
       - run: npm run validate
       - run: npm run test:e2e
       - run: npm run test:scale
@@ -31,7 +38,18 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable
-      - run: yarn install
+      - run: yarn install --no-immutable
       - run: yarn typecheck
       - run: yarn lint
       - run: yarn twenty build
+      - name: Verify dashboard is present in Twenty manifest
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const manifest = fs.readFileSync('.twenty/output/manifest.json', 'utf8');
+          const dashboardId = '18fd30f0-4330-5d01-9081-277717155743';
+          if (!manifest.includes(dashboardId) || !manifest.includes('job-search-dashboard')) {
+            console.error(manifest);
+            throw new Error('Twenty build completed without the complete job-search dashboard front component identity.');
+          }
+          NODE

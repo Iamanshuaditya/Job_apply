@@ -16,6 +16,15 @@ const companyExcluded = (excluded, company) => {
   });
 };
 
+const overlapsCompanySize = (size, min, max) => {
+  if (!size) return true;
+  const sizeMin = Number.isFinite(Number(size.min)) ? Number(size.min) : null;
+  const sizeMax = Number.isFinite(Number(size.max)) ? Number(size.max) : null;
+  if (max != null && sizeMin != null && sizeMin > max) return false;
+  if (min != null && sizeMax != null && sizeMax < min) return false;
+  return true;
+};
+
 export function hardFilter(job, preferences = {}, profile = {}) {
   const reasons = [];
   if (job.status !== 'active') reasons.push(`posting-${job.status}`);
@@ -24,6 +33,10 @@ export function hardFilter(job, preferences = {}, profile = {}) {
   if (preferences.employmentTypes?.length && !includesCI(preferences.employmentTypes, job.employmentType)) reasons.push('employment-type');
   if (preferences.workModes?.length && job.workMode !== 'unknown' && !includesCI(preferences.workModes, job.workMode)) reasons.push('work-mode');
   if (preferences.excludedLocations?.length && job.locations.some((l) => includesCI(preferences.excludedLocations, l))) reasons.push('excluded-location');
+  if (preferences.countries?.length && job.country && !includesCI(preferences.countries, job.country)) reasons.push('country');
+  const minCompanySize = Number.isFinite(Number(preferences.minCompanySize)) ? Number(preferences.minCompanySize) : null;
+  const maxCompanySize = Number.isFinite(Number(preferences.maxCompanySize)) ? Number(preferences.maxCompanySize) : null;
+  if ((minCompanySize != null || maxCompanySize != null) && !overlapsCompanySize(job.companySize, minCompanySize, maxCompanySize)) reasons.push('company-size');
   if (job.authorization?.requires && !(profile.eligibility?.authorizations || []).includes(job.authorization.requires)) reasons.push('authorization');
 
   const targetTitles = preferences.targetTitles || [];
