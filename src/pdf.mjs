@@ -6,15 +6,16 @@ import path from 'node:path';
 const htmlEscape = (value = '') => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const safeHref = (value) => { try { const url = new URL(value); return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol) ? url.toString() : null; } catch { return null; } };
 const link = (label, href) => href ? `<a href="${htmlEscape(href)}">${htmlEscape(label)}</a>` : htmlEscape(label);
-const periodOf = (item = {}) => item.period || item.dates || item.date || '';
-
+const periodOf = (item = {}) => item.period || item.dateRange || item.dates || item.date || item.duration || '';
 const sectionClaims = (resume, key, type) => resume[key] || (resume.claims || []).filter((claim) => claim.type === type);
+const normalizedKey = (value) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 export function resumeLines(resume) {
   const experience = sectionClaims(resume, 'experience', 'experience');
   const projects = sectionClaims(resume, 'projects', 'project');
   const achievements = sectionClaims(resume, 'achievements', 'achievement');
-  const additional = (resume.claims || []).filter((claim) => !['experience', 'project', 'achievement'].includes(claim.type));
+  const certifications = (resume.claims || []).filter((claim) => claim.type === 'certification');
+  const additional = (resume.claims || []).filter((claim) => !['experience', 'project', 'achievement', 'education', 'skill', 'certification'].includes(claim.type));
   const lines = [
     resume.identity.name,
     [resume.identity.email, resume.identity.phone, resume.identity.location].filter(Boolean).join(' | ')
@@ -23,6 +24,7 @@ export function resumeLines(resume) {
   if (experience.length) lines.push('EXPERIENCE', ...experience.map((claim) => `- ${claim.text}`));
   if (projects.length) lines.push('PROJECTS', ...projects.map((claim) => `- ${claim.text}`));
   if (achievements.length) lines.push('ACHIEVEMENTS', ...achievements.map((claim) => `- ${claim.text}`));
+  if (certifications.length) lines.push('CERTIFICATIONS', ...certifications.map((claim) => `- ${claim.text}`));
   if (additional.length) lines.push('ADDITIONAL', ...additional.map((claim) => `- ${claim.text}`));
   if (resume.education?.length) lines.push('EDUCATION', ...resume.education.map((item) => `${item.degree || item.title || ''} ${item.institution || item.organization || ''} ${periodOf(item)}`.trim()));
   return lines.filter(Boolean);
@@ -32,20 +34,40 @@ const experienceGroups = (claims) => {
   const groups = [];
   const byKey = new Map();
   for (const claim of claims) {
-    const key = [claim.organization || '', claim.title || '', claim.period || '', claim.location || ''].join('|');
+    const key = [claim.organization || '', claim.title || '', periodOf(claim), claim.location || ''].map(normalizedKey).join('|');
     let group = byKey.get(key);
     if (!group) {
       group = {
         organization: claim.organization || 'Experience',
         title: claim.title || '',
-        period: claim.period || '',
+        period: periodOf(claim),
         location: claim.location || '',
         claims: []
       };
       byKey.set(key, group);
       groups.push(group);
     }
-    group.claims.push(claim);
+    if (!group.claims.some((item) => normalizedKey(item.text) === normalizedKey(claim.text))) group.claims.push(claim);
+  }
+  return groups;
+};
+
+const projectGroups = (claims) => {
+  const groups = [];
+  const byKey = new Map();
+  for (const claim of claims) {
+    const name = claim.title || claim.organization || 'Project';
+    const key = normalizedKey(name);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { name, href: claim.evidenceUrl || null, period: periodOf(claim), skills: [], claims: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    if (!group.href && claim.evidenceUrl) group.href = claim.evidenceUrl;
+    if (!group.period && periodOf(claim)) group.period = periodOf(claim);
+    for (const skill of claim.skills || []) if (!group.skills.some((item) => normalizedKey(item) === normalizedKey(skill))) group.skills.push(skill);
+    if (!group.claims.some((item) => normalizedKey(item.text) === normalizedKey(claim.text))) group.claims.push(claim);
   }
   return groups;
 };
@@ -72,26 +94,25 @@ function resumeHtml(resume) {
   const experienceBody = experienceGroups(experience).map((group) => `
     <div class="entry">
       <div class="entry-row"><strong>${htmlEscape(group.organization)}</strong><strong class="right">${htmlEscape(group.period)}</strong></div>
-      <div class="entry-row sub"><em>${htmlEscape(group.title)}</em><em class="right">${htmlEscape(group.location)}</em></div>
+      ${(group.title || group.location) ? `<div class="entry-row sub"><em>${htmlEscape(group.title)}</em><em class="right">${htmlEscape(group.location)}</em></div>` : ''}
       <ul>${group.claims.map((claim) => `<li>${htmlEscape(claim.text)}</li>`).join('')}</ul>
     </div>`).join('');
 
   const projects = sectionClaims(resume, 'projects', 'project');
-  const projectBody = projects.map((claim) => {
-    const name = claim.title || claim.organization || 'Project';
-    const href = safeHref(claim.evidenceUrl);
-    const skills = (claim.skills || []).join(', ');
-    return `<div class="entry project">
-      <div class="entry-row"><strong>${link(name, href)}</strong><strong class="right">${htmlEscape(claim.period || '')}</strong></div>
-      ${skills ? `<div class="project-tech">${htmlEscape(skills)}</div>` : ''}
-      <ul><li>${htmlEscape(claim.text)}</li></ul>
-    </div>`;
-  }).join('');
+  const projectBody = projectGroups(projects).map((group) => `
+    <div class="entry project">
+      <div class="entry-row"><strong>${link(group.name, safeHref(group.href))}</strong><strong class="right">${htmlEscape(group.period)}</strong></div>
+      ${group.skills.length ? `<div class="project-tech">${htmlEscape(group.skills.join(', '))}</div>` : ''}
+      <ul>${group.claims.map((claim) => `<li>${htmlEscape(claim.text)}</li>`).join('')}</ul>
+    </div>`).join('');
 
   const achievements = sectionClaims(resume, 'achievements', 'achievement');
-  const achievementBody = achievements.length ? `<ul>${achievements.map((claim) => `<li>${htmlEscape(claim.text)}${claim.period ? ` <span class="inline-date">(${htmlEscape(claim.period)})</span>` : ''}</li>`).join('')}</ul>` : '';
+  const achievementBody = achievements.length ? `<ul>${achievements.map((claim) => `<li>${htmlEscape(claim.text)}${periodOf(claim) ? ` <span class="inline-date">(${htmlEscape(periodOf(claim))})</span>` : ''}</li>`).join('')}</ul>` : '';
 
-  const additional = (resume.claims || []).filter((claim) => !['experience', 'project', 'achievement'].includes(claim.type));
+  const certifications = (resume.claims || []).filter((claim) => claim.type === 'certification');
+  const certificationBody = certifications.length ? `<ul>${certifications.map((claim) => `<li>${htmlEscape(claim.text)}${periodOf(claim) ? ` <span class="inline-date">(${htmlEscape(periodOf(claim))})</span>` : ''}</li>`).join('')}</ul>` : '';
+
+  const additional = (resume.claims || []).filter((claim) => !['experience', 'project', 'achievement', 'education', 'skill', 'certification'].includes(claim.type));
   const additionalBody = additional.length ? `<ul>${additional.map((claim) => `<li>${htmlEscape(claim.text)}</li>`).join('')}</ul>` : '';
 
   const educationBody = (resume.education || []).map((item) => `
@@ -104,29 +125,30 @@ function resumeHtml(resume) {
     @page { size: A4; margin: 11.5mm 14mm 12mm; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 9.2pt; line-height: 1.23; overflow-wrap: anywhere; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; font-size: 9.4pt; line-height: 1.24; overflow-wrap: anywhere; }
     a { color: inherit; text-decoration: underline; text-decoration-thickness: .45px; text-underline-offset: 1px; }
-    header { text-align: center; margin-bottom: 6px; }
+    header { text-align: center; margin-bottom: 7px; }
     h1 { font-size: 19pt; line-height: 1.05; margin: 0 0 3px; font-weight: 700; letter-spacing: .2px; }
-    .contacts { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 8.35pt; }
+    .contacts { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 6px; font-size: 8.45pt; }
     .sep { color: #555; }
     section { margin-top: 7px; }
-    h2 { font-size: 9.6pt; margin: 0 0 3px; padding-bottom: 1px; border-bottom: .8px solid #111; letter-spacing: .45px; font-weight: 700; }
+    h2 { font-size: 9.8pt; margin: 0 0 3px; padding-bottom: 1px; border-bottom: .8px solid #111; letter-spacing: .45px; font-weight: 700; }
     .skill-row { display: grid; grid-template-columns: 31mm minmax(0, 1fr); gap: 4px; margin: 1px 0; }
     .entry { margin: 0 0 4px; break-inside: avoid; }
     .entry-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: baseline; }
-    .entry-row.sub { margin-top: 0; font-size: 8.8pt; }
+    .entry-row.sub { margin-top: 0; font-size: 8.9pt; }
     .right { text-align: right; white-space: nowrap; }
     ul { margin: 1px 0 0; padding-left: 15px; }
-    li { margin: 0 0 1.5px; }
-    .project-tech { font-size: 8.55pt; font-style: italic; margin-top: 0; }
-    .inline-date { color: #444; font-size: 8.5pt; }
+    li { margin: 0 0 1.7px; }
+    .project-tech { font-size: 8.65pt; font-style: italic; margin-top: 0; }
+    .inline-date { color: #444; font-size: 8.6pt; }
   </style></head><body>
     <header><h1>${htmlEscape(identity.name || '')}</h1><div class="contacts">${contacts}</div></header>
     ${renderSection('TECHNICAL SKILLS', skillBody)}
     ${renderSection('EXPERIENCE', experienceBody)}
     ${renderSection('PROJECTS', projectBody)}
     ${renderSection('ACHIEVEMENTS', achievementBody)}
+    ${renderSection('CERTIFICATIONS', certificationBody)}
     ${renderSection('ADDITIONAL', additionalBody)}
     ${renderSection('EDUCATION', educationBody)}
   </body></html>`;
