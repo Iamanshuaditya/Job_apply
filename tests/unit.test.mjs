@@ -14,6 +14,7 @@ import { verifyResume } from '../src/truth.mjs';
 import { renderResumePdf, validatePdf } from '../src/pdf.mjs';
 import { transition } from '../src/state.mjs';
 import { Ledger } from '../src/ledger.mjs';
+import { mergeProfileConfig } from '../src/control-plane.mjs';
 
 const profile = validateCareerProfile({
   identity: { name: 'A', email: 'a@example.com' },
@@ -73,19 +74,64 @@ test('full-stack JDs are not shadowed by frontend/backend keywords', () => {
   assert.equal(inferRoleFamily('Backend Engineer | Node.js APIs'), 'backend');
 });
 
-test('resume planning supplements narrow matches with useful verified evidence', () => {
+test('resume planning supplements narrow matches with diverse employers, projects and achievements', () => {
   const richProfile = validateCareerProfile({ identity:{name:'A'}, evidence:[
-    {id:'r1',fact:'Built React product UI.',skills:['React'],verified:true,type:'experience'},
-    {id:'r2',fact:'Built Node.js services.',skills:['Node.js'],verified:true,type:'experience'},
-    {id:'r3',fact:'Deployed workloads on AWS.',skills:['AWS'],verified:true,type:'project'},
-    {id:'r4',fact:'Designed PostgreSQL schemas.',skills:['PostgreSQL'],verified:true,type:'project'},
-    {id:'r5',fact:'Automated browser tests with Playwright.',skills:['Playwright'],verified:true,type:'achievement'}
+    {id:'r1',fact:'Built React product UI.',skills:['React'],verified:true,type:'experience',organization:'SyntaxErreur',period:'Mar 2025 - Present'},
+    {id:'r2',fact:'Built Node.js services.',skills:['Node.js'],verified:true,type:'experience',organization:'PivotMind',period:'Jan 2025 - Mar 2025'},
+    {id:'r3',fact:'Deployed workloads on AWS.',skills:['AWS'],verified:true,type:'project',organization:'Cloud Project'},
+    {id:'r4',fact:'Designed PostgreSQL schemas.',skills:['PostgreSQL'],verified:true,type:'project',organization:'Database Project'},
+    {id:'r5',fact:'Won a product hackathon.',skills:[],verified:true,type:'achievement'},
+    {id:'r6',fact:'Won a university coding challenge.',skills:[],verified:true,type:'achievement'},
+    {id:'r7',fact:'Automated browser tests with Playwright.',skills:['Playwright'],verified:true,type:'experience',organization:'SyntaxErreur'}
   ]});
   const job = normalizeJob({ ...rawJob, requirements:[{requirement:'React',kind:'must-have',skills:['React']}] });
   const analysis = analyzeJD(job); const matched = matchEvidence(richProfile, analysis.requirements);
   const plan = planResume({ profile:richProfile, job, matchedRequirements:matched });
-  assert.ok(plan.evidenceIds.length >= 4);
+  assert.ok(plan.evidenceIds.length >= 6);
   assert.ok(plan.evidenceIds.includes('r1'));
+  assert.ok(plan.evidenceIds.includes('r2'));
+  assert.ok(plan.evidenceIds.includes('r5'));
+  assert.ok(plan.evidenceIds.includes('r6'));
+  const resume = generateResume({ profile:richProfile, job, plan });
+  assert.equal(resume.experience.some((claim) => claim.organization === 'PivotMind'), true);
+  assert.equal(resume.projects.length, 2);
+  assert.equal(resume.achievements.length, 2);
+  assert.equal(resume.experience.find((claim) => claim.organization === 'SyntaxErreur')?.period, 'Mar 2025 - Present');
+});
+
+test('CRM profile merge preserves hand-authored fields and dates', () => {
+  const existing = {
+    version:'anshu-v1', identity:{name:'A',email:'old@example.com'},
+    education:[{degree:'BCA',institution:'Example University',period:'2025 - 2028'}],
+    evidence:[{id:'hand-1',title:'Engineer',type:'experience',organization:'SyntaxErreur',fact:'Built React product UI.',period:'Mar 2025 - Present',skills:['React'],verified:true}]
+  };
+  const incoming = {
+    version:'twenty-sync-1', identity:{name:'A',email:'new@example.com'}, education:[],
+    evidence:[{id:'crm-1',title:'Engineer',type:'experience',organization:'SyntaxErreur',fact:'Built React product UI.',skills:['React','TypeScript'],verified:true}]
+  };
+  const merged = mergeProfileConfig(existing,incoming);
+  assert.equal(merged.version,'anshu-v1');
+  assert.equal(merged.crmProjectionVersion,'twenty-sync-1');
+  assert.equal(merged.identity.email,'new@example.com');
+  assert.equal(merged.education[0].period,'2025 - 2028');
+  assert.equal(merged.evidence.length,1);
+  assert.equal(merged.evidence[0].period,'Mar 2025 - Present');
+  assert.deepEqual(merged.evidence[0].skills,['React','TypeScript']);
+});
+
+test('Twenty metadata avoids reserved field names and invalid lowercase SELECT values', async () => {
+  const root = path.resolve(import.meta.dirname, '..');
+  const [evidenceObject,resumeObject,sourceObject] = await Promise.all([
+    readFile(path.join(root,'apps/twenty-job-search-crm/src/objects/career-evidence.object.ts'),'utf8'),
+    readFile(path.join(root,'apps/twenty-job-search-crm/src/objects/resume-variant.object.ts'),'utf8'),
+    readFile(path.join(root,'apps/twenty-job-search-crm/src/objects/job-source.object.ts'),'utf8')
+  ]);
+  assert.match(evidenceObject,/name:\s*'evidenceType'/);
+  assert.doesNotMatch(evidenceObject,/name:\s*'type'/);
+  assert.match(resumeObject,/name:\s*'targetRole'/);
+  assert.match(resumeObject,/name:\s*'generatedAt'/);
+  assert.doesNotMatch(resumeObject,/name:\s*'createdAt'/);
+  for (const value of ['GREENHOUSE','LEVER','ASHBY','JSON_FEED']) assert.match(sourceObject,new RegExp(`value:\\s*'${value}'`));
 });
 
 test('truth checker rejects invented metrics and unsupported claims', () => {
@@ -99,17 +145,25 @@ test('truth checker rejects invented metrics and unsupported claims', () => {
 
 test('illegal state transitions fail loudly', () => assert.throws(() => transition('DISCOVERED','SUBMITTED'), /illegal transition/));
 
-test('real PDF is emitted with wrapped layout and expected text', async () => {
+test('real PDF is emitted with Jake-style sections, dates and wrapped layout', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(),'job-pdf-'));
-  const pdfProfile = validateCareerProfile({ identity:{name:'Résumé Candidate',email:'resume@example.com'}, evidence:[
-    {id:'long',fact:'Built a customer-facing TypeScript and React workflow with a deliberately long evidence sentence that must wrap inside the printable page instead of overflowing beyond the right margin.',skills:['React','TypeScript'],verified:true},
-    {id:'api',fact:'Built Node.js APIs with PostgreSQL.',skills:['Node.js','PostgreSQL'],verified:true},
-    {id:'cloud',fact:'Deployed services on AWS.',skills:['AWS'],verified:true}
-  ]});
+  const pdfProfile = validateCareerProfile({
+    identity:{name:'Résumé Candidate',email:'resume@example.com'},
+    education:[{degree:'BCA',institution:'Example University',period:'2025 - 2028'}],
+    evidence:[
+      {id:'long',fact:'Built a customer-facing TypeScript and React workflow with a deliberately long evidence sentence that must wrap inside the printable page instead of overflowing beyond the right margin.',skills:['React','TypeScript'],verified:true,type:'experience',organization:'Acme',title:'Full Stack Engineer',period:'Mar 2025 - Present'},
+      {id:'api',fact:'Built Node.js APIs with PostgreSQL.',skills:['Node.js','PostgreSQL'],verified:true,type:'experience',organization:'Acme',title:'Full Stack Engineer',period:'Mar 2025 - Present'},
+      {id:'cloud',fact:'Deployed services on AWS.',skills:['AWS'],verified:true,type:'project',organization:'Cloud Console',evidenceUrl:'https://example.com/cloud'},
+      {id:'project2',fact:'Built realtime collaboration features.',skills:['Socket.IO','WebSockets'],verified:true,type:'project',organization:'Realtime App'},
+      {id:'award',fact:'Won a university product hackathon.',skills:[],verified:true,type:'achievement'}
+    ]
+  });
   const job = normalizeJob(rawJob); const analysis = analyzeJD(job); const matched = matchEvidence(pdfProfile, analysis.requirements);
   const plan = planResume({ profile:pdfProfile, job, matchedRequirements:matched }); const resume = generateResume({ profile:pdfProfile, job, plan });
   const file = path.join(dir,'resume.pdf'); await renderResumePdf(resume,file); const report = await validatePdf(file,resume);
   assert.equal(report.valid,true); assert.ok(report.pages>=1); assert.ok(report.text.includes('TECHNICAL SKILLS'));
+  assert.ok(report.text.includes('EXPERIENCE')); assert.ok(report.text.includes('PROJECTS')); assert.ok(report.text.includes('ACHIEVEMENTS')); assert.ok(report.text.includes('EDUCATION'));
+  assert.ok(report.text.includes('Mar 2025 - Present')); assert.ok(report.text.includes('2025 - 2028'));
   assert.equal(report.layout.horizontalOverflow,false); assert.ok(report.text.includes('Résumé Candidate'));
   assert.equal((await readFile(file)).subarray(0,5).toString(), '%PDF-');
 });
