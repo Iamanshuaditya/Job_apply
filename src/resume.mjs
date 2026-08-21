@@ -1,10 +1,23 @@
 import { evidenceIndex } from './career.mjs';
 import { uniq } from './utils.mjs';
 
-const LANGUAGE_SKILLS = new Set(['javascript','typescript','python','java','go','c++','c#','ruby','php','swift','kotlin','sql','html','css']);
-const FRAMEWORK_SKILLS = new Set(['react','react.js','next.js','node.js','express','react native','flutter','tailwind','graphql','prisma','supabase','socket.io','websockets','jest','vitest','playwright']);
-const DATABASE_SKILLS = new Set(['postgresql','mysql','mongodb','redis','sqlite','dynamodb','elasticsearch']);
-const CLOUD_TOOL_SKILLS = new Set(['aws','gcp','azure','docker','kubernetes','terraform','ci/cd','git','github actions','vercel','cloudflare','rest','microservices']);
+const LANGUAGE_SKILLS = new Set(['javascript','typescript','python','java','go','c++','c#','ruby','php','swift','kotlin','html','css']);
+const FRAMEWORK_SKILLS = new Set(['react','next.js','node.js','express','react native','flutter','tailwind','prisma','supabase','jest','vitest','playwright']);
+const DATABASE_SKILLS = new Set(['sql','postgresql','mysql','mongodb','redis','sqlite','dynamodb','elasticsearch']);
+const CLOUD_TOOL_SKILLS = new Set(['aws','gcp','azure','docker','kubernetes','terraform','ci/cd','git','github actions','vercel','cloudflare']);
+const ARCHITECTURE_SKILLS = new Set(['rest','graphql','microservices','socket.io','websockets']);
+const SKILL_ALIASES = new Map([
+  ['react.js', 'React'],
+  ['reactjs', 'React'],
+  ['nextjs', 'Next.js'],
+  ['node', 'Node.js'],
+  ['nodejs', 'Node.js'],
+  ['postgres', 'PostgreSQL'],
+  ['postgresql', 'PostgreSQL'],
+  ['rest api', 'REST'],
+  ['rest APIs', 'REST'],
+  ['web sockets', 'WebSockets']
+]);
 
 const normalizedType = (value = '') => {
   const type = String(value).toLowerCase();
@@ -17,18 +30,28 @@ const normalizedType = (value = '') => {
   return 'other';
 };
 
+const canonicalSkill = (skill) => {
+  const raw = String(skill || '').trim();
+  if (!raw) return '';
+  const direct = SKILL_ALIASES.get(raw.toLowerCase());
+  if (direct) return direct;
+  return raw;
+};
+
 const technicalGroupFor = (skill) => {
-  const key = String(skill).trim().toLowerCase();
+  const key = canonicalSkill(skill).toLowerCase();
   if (LANGUAGE_SKILLS.has(key)) return 'Languages';
   if (FRAMEWORK_SKILLS.has(key)) return 'Frameworks / Libraries';
   if (DATABASE_SKILLS.has(key)) return 'Databases';
+  if (ARCHITECTURE_SKILLS.has(key)) return 'APIs / Architecture';
   if (CLOUD_TOOL_SKILLS.has(key)) return 'Cloud / Tools';
   return null;
 };
 
 const addUnique = (chosen, evidence, maximumClaims) => {
-  if (!evidence || chosen.length >= maximumClaims || chosen.some((item) => item.id === evidence.id)) return;
+  if (!evidence || chosen.length >= maximumClaims || chosen.some((item) => item.id === evidence.id)) return false;
   chosen.push(evidence);
+  return true;
 };
 
 export function planResume({ profile, job, matchedRequirements }) {
@@ -41,49 +64,59 @@ export function planResume({ profile, job, matchedRequirements }) {
   const ranked = profile.evidence.map((evidence, index) => {
     const skillHits = (evidence.skills || []).filter((skill) => jd.includes(String(skill).toLowerCase())).length;
     const type = normalizedType(evidence.type);
-    const typeBonus = type === 'experience' ? 3 : type === 'project' ? 2.5 : type === 'achievement' ? 2 : 0;
+    const typeBonus = type === 'experience' ? 3 : type === 'project' ? 2.5 : type === 'achievement' ? 3 : 0;
     return { evidence, type, score: (matchCounts.get(evidence.id) || 0) * 10 + skillHits * 3 + typeBonus - index / 1000 };
   }).sort((a, b) => b.score - a.score);
 
   const directlyMatched = new Set(matchCounts.keys());
-  const minimumClaims = Math.min(8, profile.evidence.filter((item) => normalizedType(item.type) !== 'education').length);
-  const maximumClaims = Math.min(12, profile.evidence.length);
+  const eligible = profile.evidence.filter((item) => !['education', 'skill'].includes(normalizedType(item.type)));
+  const minimumClaims = Math.min(10, eligible.length);
+  const maximumClaims = Math.min(16, eligible.length);
   const chosen = [];
 
+  // Keep direct JD evidence while reserving room for the strongest projects/achievements on early-career profiles.
+  const reservedBreadthSlots = Math.min(5, maximumClaims);
+  const directCap = Math.max(1, maximumClaims - reservedBreadthSlots);
   for (const row of ranked) {
-    if (directlyMatched.has(row.evidence.id) && row.type !== 'education') addUnique(chosen, row.evidence, maximumClaims);
+    if (chosen.length >= directCap) break;
+    if (directlyMatched.has(row.evidence.id) && !['education', 'skill'].includes(row.type)) addUnique(chosen, row.evidence, maximumClaims);
   }
 
-  // Preserve breadth: every verified employer gets representation before duplicate bullets consume the budget.
-  const representedOrganizations = new Set(chosen.filter((item) => normalizedType(item.type) === 'experience').map((item) => String(item.organization || '').toLowerCase()).filter(Boolean));
-  for (const row of ranked.filter((item) => item.type === 'experience' && item.evidence.organization)) {
-    const organization = String(row.evidence.organization).toLowerCase();
-    if (!representedOrganizations.has(organization)) {
-      addUnique(chosen, row.evidence, maximumClaims);
-      representedOrganizations.add(organization);
-    }
-  }
-
-  // Jake-style resumes benefit from distinct project and achievement sections, so keep useful breadth even when the JD match is narrow.
-  for (const type of ['project', 'achievement']) {
-    const floor = type === 'project' ? 2 : 2;
+  // Guarantee project and achievement signal before employer bullets consume the remaining budget.
+  for (const [type, floor] of [['achievement', 3], ['project', 2]]) {
     let count = chosen.filter((item) => normalizedType(item.type) === type).length;
     for (const row of ranked.filter((item) => item.type === type)) {
       if (count >= floor) break;
-      const before = chosen.length;
-      addUnique(chosen, row.evidence, maximumClaims);
-      if (chosen.length > before) count++;
+      if (addUnique(chosen, row.evidence, maximumClaims)) count++;
     }
   }
 
-  for (const row of ranked) {
-    if (chosen.length >= minimumClaims) break;
-    if (row.type !== 'education') addUnique(chosen, row.evidence, maximumClaims);
+  // Every verified employer gets representation where capacity permits.
+  const representedOrganizations = new Set(
+    chosen.filter((item) => normalizedType(item.type) === 'experience')
+      .map((item) => String(item.organization || '').toLowerCase()).filter(Boolean)
+  );
+  for (const row of ranked.filter((item) => item.type === 'experience' && item.evidence.organization)) {
+    const organization = String(row.evidence.organization).toLowerCase();
+    if (!representedOrganizations.has(organization) && addUnique(chosen, row.evidence, maximumClaims)) representedOrganizations.add(organization);
   }
 
-  const technicalSkills = uniq(chosen.flatMap((evidence) => evidence.skills || []))
-    .filter((skill) => technicalGroupFor(skill))
-    .sort((a, b) => Number(jd.includes(String(b).toLowerCase())) - Number(jd.includes(String(a).toLowerCase())));
+  // Fill remaining capacity by relevance, excluding education and skill-only rows from claim sections.
+  for (const row of ranked) {
+    if (chosen.length >= Math.max(minimumClaims, maximumClaims)) break;
+    if (!['education', 'skill'].includes(row.type)) addUnique(chosen, row.evidence, maximumClaims);
+  }
+
+  const technicalSkills = [];
+  const seenSkills = new Set();
+  for (const skill of chosen.flatMap((evidence) => evidence.skills || [])) {
+    const canonical = canonicalSkill(skill);
+    const key = canonical.toLowerCase();
+    if (!technicalGroupFor(canonical) || seenSkills.has(key)) continue;
+    seenSkills.add(key);
+    technicalSkills.push(canonical);
+  }
+  technicalSkills.sort((a, b) => Number(jd.includes(String(b).toLowerCase())) - Number(jd.includes(String(a).toLowerCase())));
 
   const skillGroups = {};
   for (const skill of technicalSkills) {
@@ -105,13 +138,13 @@ export function planResume({ profile, job, matchedRequirements }) {
 const claimFromEvidence = (evidence) => ({
   text: evidence.fact,
   evidenceIds: [evidence.id],
-  organization: evidence.organization || null,
-  title: evidence.title || null,
+  organization: evidence.organization || evidence.company || evidence.employer || null,
+  title: evidence.role || evidence.position || evidence.jobTitle || evidence.title || null,
   type: normalizedType(evidence.type),
-  period: evidence.period || evidence.dates || evidence.date || null,
-  location: evidence.location || null,
-  evidenceUrl: evidence.evidenceUrl || evidence.url || null,
-  skills: evidence.skills || []
+  period: evidence.period || evidence.dateRange || evidence.dates || evidence.date || evidence.duration || null,
+  location: evidence.location || evidence.workLocation || evidence.city || null,
+  evidenceUrl: evidence.evidenceUrl || evidence.url || evidence.link || null,
+  skills: (evidence.skills || []).map(canonicalSkill).filter(Boolean)
 });
 
 const sectionsFromClaims = (claims) => ({
@@ -134,10 +167,10 @@ export function generateResume({ profile, job, plan, injectUnsupportedClaim = fa
   const evidenceEducation = profile.evidence
     .filter((evidence) => normalizedType(evidence.type) === 'education')
     .map((evidence) => ({
-      degree: evidence.title || evidence.fact,
-      institution: evidence.organization || '',
-      period: evidence.period || evidence.dates || evidence.date || null,
-      location: evidence.location || null,
+      degree: evidence.title || evidence.degree || evidence.fact,
+      institution: evidence.organization || evidence.institution || '',
+      period: evidence.period || evidence.dateRange || evidence.dates || evidence.date || null,
+      location: evidence.location || evidence.city || null,
       evidenceId: evidence.id
     }));
 
